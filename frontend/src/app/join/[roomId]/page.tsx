@@ -179,27 +179,39 @@ export default function JoinPage() {
                 <>
                   <h2 className="text-2xl font-black text-center mb-6">🏇 The Race is On! 🏇</h2>
                   <div className="space-y-3">
-                    {raceState.positions.map((pos) => (
-                      <div key={pos.option_id} className="relative">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-sm font-medium flex-1 truncate">{pos.label}</span>
-                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                            ×{room?.bet_options.find(o => o.id === pos.option_id)?.odds.toFixed(1)}
-                          </span>
-                        </div>
-                        <div className="h-6 rounded-full overflow-hidden" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-                          <div 
-                            className="h-full transition-all duration-300 ease-linear flex items-center justify-end pr-1"
-                            style={{ 
-                              width: `${pos.position}%`,
-                              background: `linear-gradient(90deg, var(--accent) 0%, var(--accent-glow) 100%)`,
-                            }}
-                          >
-                            <span>🐎</span>
+                    {raceState.positions.map((pos, index) => {
+                      const isWinner = pos.is_winner;
+                      const rank = pos.rank || (index + 1);
+                      const rankSuffix = rank === 1 ? 'st' : rank === 2 ? 'nd' : rank === 3 ? 'rd' : 'th';
+                      
+                      return (
+                        <div key={pos.option_id}>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-lg">{isWinner ? '🏆' : '🐎'}</span>
+                            <span className={`text-sm font-medium flex-1 truncate ${isWinner ? 'font-black text-green-400' : ''}`}>
+                              {pos.label}
+                              {isWinner && <span className="ml-2 text-green-400 font-black">WINNER!</span>}
+                            </span>
+                            <span className="text-xs" style={{ color: isWinner ? '#4ade80' : 'var(--text-muted)' }}>
+                              {pos.position.toFixed(2)}% | {rank}{rankSuffix} | ×{room?.bet_options.find(o => o.id === pos.option_id)?.odds.toFixed(1)}
+                            </span>
+                          </div>
+                          <div className="h-6 rounded-full overflow-hidden" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+                            <div 
+                              className="h-full transition-all duration-150 flex items-center justify-end pr-1"
+                              style={{ 
+                                width: `${Math.min(pos.position, 100)}%`, 
+                                background: isWinner 
+                                  ? 'linear-gradient(90deg, #22c55e 0%, #4ade80 100%)' 
+                                  : 'linear-gradient(90deg, var(--accent) 0%, var(--accent-glow) 100%)' 
+                              }}
+                            >
+                              <span>{isWinner ? '🏆' : '🐎'}</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   <div className="mt-4 text-center">
                     <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -294,9 +306,14 @@ export default function JoinPage() {
               ))}
             </div>
             <div className="flex gap-2">
-              <input type="number" className="flex-1 px-3 py-2.5 rounded-lg text-sm outline-none"
+              <input 
+                type="number" 
+                className="flex-1 px-3 py-2.5 rounded-lg text-sm outline-none"
                 style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text)' }}
-                value={betAmount} onChange={e => setBetAmount(e.target.value)} placeholder="Custom amount" />
+                value={betAmount} 
+                onChange={e => setBetAmount(e.target.value)} 
+                placeholder="Custom amount" 
+              />
               <button onClick={placeBet} className="btn-primary px-6 glow-accent">Place Bet</button>
             </div>
             {selectedOption && me && (

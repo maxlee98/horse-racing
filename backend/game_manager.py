@@ -14,11 +14,13 @@ class GameManager:
         room_id = str(uuid.uuid4())[:8].upper()
         options = [BetOption(**opt) for opt in bet_options] if bet_options else []
         
-        # Initialize equal probabilities for all options
+        # Calculate probabilities based on inverse of odds (lower odds = higher probability)
         if options:
-            prob = 1.0 / len(options)
-            for opt in options:
-                opt.probability = prob
+            # Inverse odds: 1/odds gives weight, normalize to get probability
+            inverse_odds = [1.0 / opt.odds for opt in options]
+            total_inverse = sum(inverse_odds)
+            for i, opt in enumerate(options):
+                opt.probability = round(inverse_odds[i] / total_inverse, 4)
         
         room = GameRoom(
             room_id=room_id,
@@ -296,56 +298,139 @@ class GameManager:
         if not room.bet_options:
             return False, "No horses in race", None
         
+        import time
+        start_time = time.time()
+        
         # Notify race started
         await broadcast_callback({
             "type": "race_started",
-            "data": {"horses": [opt.model_dump() for opt in room.bet_options]}
+            "data": {"horses": [opt.model_dump() for opt in room.bet_options], "start_time": start_time}
         })
         
-        # Simulate race progress (slower - 8 seconds)
-        race_duration = 8.0  # seconds - slower animation
-        steps = 40  # more steps for smoother animation
-        step_duration = race_duration / steps
+        # Track cumulative position and finish times for each horse
+        horse_positions: dict[str, float] = {opt.id: 0.0 for opt in room.bet_options}
+        horse_finish_times: dict[str, float] = {}  # horse_id -> finish time
+        horse_ranks: dict[str, int] = {}  # horse_id -> rank
+        current_rank = 1
         
-        for step in range(steps):
+        # Race simulation - each horse progresses at different speeds
+        max_race_time = 15.0  # Maximum race duration in seconds
+        elapsed = 0.0
+        step_duration = 0.05  # 50ms per update
+        
+        while elapsed < max_race_time and len(horse_finish_times) < len(room.bet_options):
             await asyncio.sleep(step_duration)
-            progress = (step + 1) / steps
+            elapsed += step_duration
             
-            # Generate random positions weighted by probability
+            # Update each horse's position
+            for opt in room.bet_options:
+                if opt.id in horse_finish_times:
+                    continue  # Already finished
+                
+                # Speed based on probability - higher prob = faster
+                base_speed = 100 / (8 + (1 - opt.probability) * 7)  # 8-15 seconds to finish
+                speed_variation = random.uniform(0.8, 1.2)
+                speed = base_speed * speed_variation
+                
+                # Update position
+                new_position = horse_positions[opt.id] + speed * step_duration
+                
+                # Check if finished
+                if new_position >= 100.0:
+                    new_position = 100.0
+                    horse_finish_times[opt.id] = elapsed
+                    horse_ranks[opt.id] = current_rank
+                    current_rank += 1
+                
+                horse_positions[opt.id] = new_position
+            
+            # Create positions array with current rankings
             positions = []
             for opt in room.bet_options:
-                # Base progress + randomness weighted by probability
-                base = progress * 100
-                # Slower movement - less noise
-                noise = random.gauss(0, 5) * (1 - opt.probability * 0.3)  # Higher prob = less noise
                 positions.append({
                     "option_id": opt.id,
                     "label": opt.label,
-                    "position": max(0, min(100, base + noise)),
-                    "probability": opt.probability
+                    "position": round(horse_positions[opt.id], 1),
+                    "probability": opt.probability,
+                    "rank": horse_ranks.get(opt.id, 0),
+                    "finish_time": round(horse_finish_times.get(opt.id, 0), 2) if opt.id in horse_finish_times else None
                 })
+            
+            progress = len(horse_finish_times) / len(room.bet_options)
             
             await broadcast_callback({
                 "type": "race_progress",
-                "data": {"positions": positions, "progress": progress}
+                "data": {
+                    "positions": positions, 
+                    "progress": progress,
+                    "elapsed_time": round(elapsed, 2),
+                    "finished_count": len(horse_finish_times)
+                }
             })
         
-        # Select winner by probability
-        success, msg, winner_id = self.select_winner_by_probability(room_id, host_id)
+        # Determine winner based on race finish (1st place finisher is the winner)
+        # Sort by finish time and get the first one
+        sorted_by_time = sorted(
+            [(opt_id, time) for opt_id, time in horse_finish_times.items()],
+            key=lambda x: x[1]
+        )
+        winner_id = sorted_by_time[0][0] if sorted_by_time else room.bet_options[0].id
         
-        # 3 second countdown before showing winner
+        # Set the winner
+        success, msg = self.set_winner(room_id, winner_id, host_id)
+        
         if success and winner_id:
             winner = next((o for o in room.bet_options if o.id == winner_id), None)
             
-            # Countdown from 3
+            # Create final results with all horses at 100% and rankings
+            final_positions = []
+            for opt in room.bet_options:
+                is_winner = opt.id == winner_id
+                # Ensure all finished horses have a rank
+                if opt.id not in horse_ranks:
+                    horse_ranks[opt.id] = current_rank
+                    current_rank += 1
+                if opt.id not in horse_finish_times:
+                    horse_finish_times[opt.id] = elapsed
+                
+                final_positions.append({
+                    "option_id": opt.id,
+                    "label": opt.label,
+                    "position": 100.0,
+                    "probability": opt.probability,
+                    "rank": horse_ranks[opt.id],
+                    "finish_time": round(horse_finish_times[opt.id], 2),
+                    "is_winner": is_winner
+                })
+            
+            # Sort by rank for the results
+            final_positions.sort(key=lambda x: x["rank"])
+            
+            # Show final results
+            await broadcast_callback({
+                "type": "race_progress",
+                "data": {
+                    "positions": final_positions, 
+                    "progress": 1.0,
+                    "race_complete": True,
+                    "message": "🏁 Race Complete!",
+                    "winner_id": winner_id
+                }
+            })
+            
+            await asyncio.sleep(2)
+            
+            # Countdown before revealing winner
             for count in [3, 2, 1]:
                 await broadcast_callback({
                     "type": "race_progress",
                     "data": {
-                        "positions": positions, 
+                        "positions": final_positions, 
                         "progress": 1.0,
+                        "race_complete": True,
                         "countdown": count,
-                        "message": f"Winner revealed in {count}..."
+                        "message": f"Winner revealed in {count}...",
+                        "winner_id": winner_id
                     }
                 })
                 await asyncio.sleep(1)
@@ -355,6 +440,8 @@ class GameManager:
                 "data": {
                     "winner_id": winner_id,
                     "winner_label": winner.label if winner else "Unknown",
+                    "final_results": final_positions,
+                    "race_duration": round(elapsed, 2),
                     "room_state": self.get_room_state(room_id)
                 }
             })

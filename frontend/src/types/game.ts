@@ -13,6 +13,16 @@ export interface RacePosition {
   label: string;
   position: number;  // 0-100 race progress
   probability: number;
+  rank?: number;  // Position in race (1st, 2nd, etc.)
+  finish_time?: number;  // Time in seconds to finish
+  is_winner?: boolean;  // Whether this horse is the winner
+}
+
+export interface RaceResults {
+  positions: RacePosition[];
+  race_duration: number;
+  winner_id: string;
+  winner_label: string;
 }
 
 export interface Player {

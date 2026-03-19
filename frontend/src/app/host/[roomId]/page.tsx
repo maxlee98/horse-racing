@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { RoomState, WSMessage, RaceState, RacePosition } from '@/types/game';
+import { RoomState, WSMessage, RaceState, RacePosition, RaceResults } from '@/types/game';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -21,6 +21,7 @@ export default function HostPage() {
     progress: 0,
     winner_id: null,
   });
+  const [raceResults, setRaceResults] = useState<RaceResults | null>(null);
 
   useEffect(() => {
     const id = sessionStorage.getItem(`host_${roomId}`);
@@ -33,7 +34,6 @@ export default function HostPage() {
     if (msg.type === 'room_state') {
       const rs = msg.data as unknown as RoomState;
       setRoom(rs);
-      // Initialize editing probabilities from room state
       const probs: Record<string, number> = {};
       rs.bet_options.forEach(opt => {
         probs[opt.id] = Math.round((opt.probability || 0) * 100);
@@ -41,7 +41,6 @@ export default function HostPage() {
       setEditingProbs(probs);
     } else if (state) {
       setRoom(state);
-      // Always update editing probabilities from room state to keep in sync
       const probs: Record<string, number> = {};
       state.bet_options.forEach(opt => {
         probs[opt.id] = Math.round((opt.probability || 0) * 100);
@@ -49,7 +48,6 @@ export default function HostPage() {
       setEditingProbs(probs);
     }
 
-    // Handle horse racing messages
     if (msg.type === 'race_started') {
       const horses = (msg.data as { horses: Array<{ id: string; label: string; probability: number }> }).horses;
       setRaceState({
@@ -58,20 +56,27 @@ export default function HostPage() {
         progress: 0,
         winner_id: null,
       });
+      setRaceResults(null);
     } else if (msg.type === 'race_progress') {
-      const { positions, progress } = msg.data as { positions: RacePosition[]; progress: number };
-      setRaceState(prev => ({
-        ...prev,
-        positions,
-        progress,
+      const data = msg.data as { positions: RacePosition[]; progress: number; race_complete?: boolean; finished_count?: number };
+      setRaceState(prev => ({ 
+        ...prev, 
+        positions: data.positions, 
+        progress: data.progress,
+        finished_count: data.finished_count 
       }));
     } else if (msg.type === 'race_ended') {
-      const { winner_id } = msg.data as { winner_id: string };
-      setRaceState(prev => ({
-        ...prev,
-        is_racing: false,
-        winner_id,
-      }));
+      const data = msg.data as { winner_id: string; final_results?: RacePosition[]; race_duration?: number };
+      setRaceState(prev => ({ ...prev, is_racing: false, winner_id: data.winner_id }));
+      if (data.final_results && data.race_duration) {
+        const winner = data.final_results.find(p => p.is_winner);
+        setRaceResults({
+          positions: data.final_results,
+          race_duration: data.race_duration,
+          winner_id: data.winner_id,
+          winner_label: winner?.label || 'Unknown'
+        });
+      }
     }
   }, []);
 
@@ -88,7 +93,6 @@ export default function HostPage() {
     fetch(`${API}/api/rooms/${roomId}`)
       .then(r => r.json()).then((data) => {
         setRoom(data);
-        // Initialize editing probabilities
         const probs: Record<string, number> = {};
         data.bet_options.forEach((opt: { id: string; probability: number }) => {
           probs[opt.id] = Math.round((opt.probability || 0) * 100);
@@ -138,7 +142,6 @@ export default function HostPage() {
   return (
     <main className="min-h-screen p-6">
       <div className="max-w-5xl mx-auto">
-        {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
             <div className="flex items-center gap-3 mb-1">
@@ -159,9 +162,7 @@ export default function HostPage() {
               <span className={connected ? 'text-green-400' : 'text-red-400'}>
                 {connected ? '● Connected' : '○ Disconnected'}
               </span>
-              {room && (
-                <>&nbsp;·&nbsp;Round {room.round_number}</>
-              )}
+              {room && <>&nbsp;·&nbsp;Round {room.round_number}</>}
             </p>
           </div>
         </div>
@@ -170,7 +171,6 @@ export default function HostPage() {
         {raceState.is_racing && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.95)' }}>
             <div className="w-full max-w-4xl">
-              {/* Countdown Display */}
               {raceState.countdown ? (
                 <div className="text-center">
                   <div className="text-8xl font-black mb-4" style={{ color: 'var(--accent-glow)' }}>
@@ -184,33 +184,56 @@ export default function HostPage() {
                 <>
                   <h2 className="text-3xl font-black text-center mb-8">🏇 The Race is On! 🏇</h2>
                   <div className="space-y-4">
-                    {raceState.positions.map((pos) => (
-                      <div key={pos.option_id} className="relative">
-                        <div className="flex items-center gap-3 mb-1">
-                          <span className="text-lg">🐎</span>
-                          <span className="text-sm font-medium w-32 truncate">{pos.label}</span>
-                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                            {Math.round(pos.position)}% | ×{room?.bet_options.find(o => o.id === pos.option_id)?.odds.toFixed(1)}
-                          </span>
-                        </div>
-                        <div className="h-8 rounded-full overflow-hidden" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-                          <div 
-                            className="h-full transition-all duration-300 ease-linear flex items-center justify-end pr-2"
-                            style={{ 
-                              width: `${pos.position}%`,
-                              background: `linear-gradient(90deg, var(--accent) 0%, var(--accent-glow) 100%)`,
-                            }}
-                          >
-                            <span className="text-lg">🐎</span>
+                    {raceState.positions.map((pos) => {
+                      const isWinner = pos.is_winner;
+                      const rank = pos.rank || 0;
+                      const rankDisplay = rank > 0 ? `${rank}${rank === 1 ? 'st' : rank === 2 ? 'nd' : rank === 3 ? 'rd' : 'th'}` : '-';
+                      const hasFinished = pos.finish_time !== undefined && pos.finish_time !== null;
+                      
+                      return (
+                        <div key={pos.option_id}>
+                          <div className="flex items-center gap-3 mb-1">
+                            <span className="text-lg">{isWinner ? '🏆' : '🐎'}</span>
+                            <span className={`text-sm font-medium w-32 truncate ${isWinner ? 'font-black text-green-400' : ''}`}>
+                              {pos.label}
+                            </span>
+                            <span className="text-xs px-2 py-0.5 rounded" style={{ 
+                              background: rank === 1 ? 'rgba(34, 197, 94, 0.2)' : rank === 2 ? 'rgba(234, 179, 8, 0.2)' : rank === 3 ? 'rgba(249, 115, 22, 0.2)' : 'var(--bg-elevated)',
+                              color: rank === 1 ? '#4ade80' : rank === 2 ? '#facc15' : rank === 3 ? '#fb923c' : 'var(--text-muted)',
+                              border: `1px solid ${rank === 1 ? '#22c55e' : rank === 2 ? '#eab308' : rank === 3 ? '#f97316' : 'var(--border)'}`,
+                              fontWeight: 'bold'
+                            }}>
+                              {rankDisplay}
+                            </span>
+                            {hasFinished && (
+                              <span className="text-xs" style={{ color: '#4ade80' }}>
+                                {pos.finish_time?.toFixed(2)}s
+                              </span>
+                            )}
+                          </div>
+                          <div className="h-8 rounded-full overflow-hidden" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+                            <div 
+                              className="h-full transition-all duration-100 flex items-center justify-end pr-2"
+                              style={{ 
+                                width: `${Math.min(pos.position, 100)}%`, 
+                                background: isWinner 
+                                  ? 'linear-gradient(90deg, #22c55e 0%, #4ade80 100%)' 
+                                  : 'linear-gradient(90deg, var(--accent) 0%, var(--accent-glow) 100%)' 
+                              }}>
+                              <span className="text-lg">{isWinner ? '🏆' : '🐎'}</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   <div className="mt-6 text-center">
                     <div className="inline-block px-4 py-2 rounded-lg" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
                       <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                        Race Progress: {Math.round(raceState.progress * 100)}%
+                        {(raceState as { finished_count?: number }).finished_count !== undefined 
+                          ? `${(raceState as { finished_count?: number }).finished_count}/${raceState.positions.length} Finished`
+                          : `Race Progress: ${Math.round(raceState.progress * 100)}%`
+                        }
                       </span>
                     </div>
                   </div>
@@ -221,13 +244,9 @@ export default function HostPage() {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left — QR + Stats */}
           <div className="space-y-4">
-            {/* QR Card */}
             <div className="card p-5 text-center">
-              <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>
-                Scan to Join
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>Scan to Join</p>
               {qr ? (
                 <img src={qr.qr_base64} alt="QR Code" className="w-44 h-44 mx-auto rounded-lg" />
               ) : (
@@ -240,8 +259,6 @@ export default function HostPage() {
                 {copied ? '✓ Copied!' : '🔗 Copy Link'}
               </button>
             </div>
-
-            {/* Stats */}
             <div className="card p-5 space-y-3">
               <StatRow label="Players" value={`${connectedPlayers.length} / ${room?.max_players || 8}`} />
               <StatRow label="Total Bets" value={`$${totalBetAmount.toFixed(0)}`} />
@@ -250,48 +267,26 @@ export default function HostPage() {
             </div>
           </div>
 
-          {/* Middle — Controls */}
           <div className="space-y-4">
             <div className="card p-5">
-              <p className="text-xs font-semibold uppercase tracking-widest mb-4" style={{ color: 'var(--text-muted)' }}>
-                Game Controls
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-widest mb-4" style={{ color: 'var(--text-muted)' }}>Game Controls</p>
               <div className="space-y-2">
-                <ControlBtn onClick={() => hostAction('open_bets')} disabled={room?.status === 'open'} color="var(--green)">
-                  🎯 Open Betting
-                </ControlBtn>
-                <ControlBtn onClick={() => hostAction('lock_bets')} disabled={room?.status !== 'open'} color="var(--amber)">
-                  🔒 Lock Bets
-                </ControlBtn>
-                
-                {/* Next Round button - only show when game ended */}
+                <ControlBtn onClick={() => hostAction('open_bets')} disabled={room?.status === 'open'} color="var(--green)">🎯 Open Betting</ControlBtn>
+                <ControlBtn onClick={() => hostAction('lock_bets')} disabled={room?.status !== 'open'} color="var(--amber)">🔒 Lock Bets</ControlBtn>
                 {room?.status === 'ended' && (
-                  <ControlBtn onClick={() => hostAction('next_round')} color="var(--accent-glow)">
-                    ➡️ Next Round (Randomize Probs)
-                  </ControlBtn>
+                  <ControlBtn onClick={() => hostAction('next_round')} color="var(--accent-glow)">➡️ Next Round (Randomize Probs)</ControlBtn>
                 )}
-                
-                <ControlBtn onClick={() => hostAction('reset_lobby')} color="var(--red)">
-                  🔄 Reset Lobby
-                </ControlBtn>
+                <ControlBtn onClick={() => hostAction('reset_lobby')} color="var(--red)">🔄 Reset Lobby</ControlBtn>
               </div>
             </div>
 
-            {/* Probability Controls */}
             <div className="card p-5">
               <div className="flex items-center justify-between mb-4">
-                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
-                  Win Probabilities
-                </p>
-                <button
-                  onClick={() => setShowProbabilities(!showProbabilities)}
-                  className="text-xs px-2 py-1 rounded transition-colors"
-                  style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)' }}
-                >
+                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Win Probabilities</p>
+                <button onClick={() => setShowProbabilities(!showProbabilities)} className="text-xs px-2 py-1 rounded" style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)' }}>
                   {showProbabilities ? 'Hide' : 'Show'}
                 </button>
               </div>
-              
               {showProbabilities && (
                 <>
                   <div className="space-y-3 mb-4">
@@ -299,86 +294,87 @@ export default function HostPage() {
                       <div key={opt.id} className="flex items-center gap-3">
                         <span className="text-sm flex-1 truncate">{opt.label}</span>
                         <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
+                          <input type="number" min="0" max="100"
                             value={editingProbs[opt.id] ?? Math.round((opt.probability || 0) * 100)}
                             onChange={(e) => handleProbChange(opt.id, parseInt(e.target.value) || 0)}
                             className="w-16 px-2 py-1 rounded text-sm text-center"
-                            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text)' }}
-                          />
+                            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text)' }} />
                           <span className="text-sm" style={{ color: 'var(--text-muted)' }}>%</span>
                         </div>
                       </div>
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <button
-                      onClick={updateProbabilities}
-                      className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
-                      style={{ background: 'var(--accent-soft)', color: 'var(--accent-glow)', border: '1px solid var(--accent)' }}
-                    >
-                      💾 Save Probs
-                    </button>
-                    <button
-                      onClick={randomizeProbabilities}
-                      className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
-                      style={{ background: 'var(--bg-elevated)', color: 'var(--text)', border: '1px solid var(--border)' }}
-                    >
-                      🎲 Randomize
-                    </button>
+                    <button onClick={updateProbabilities} className="flex-1 py-2 rounded-lg text-sm font-medium" style={{ background: 'var(--accent-soft)', color: 'var(--accent-glow)', border: '1px solid var(--accent)' }}>💾 Save Probs</button>
+                    <button onClick={randomizeProbabilities} className="flex-1 py-2 rounded-lg text-sm font-medium" style={{ background: 'var(--bg-elevated)', color: 'var(--text)', border: '1px solid var(--border)' }}>🎲 Randomize</button>
                   </div>
-                  <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>
-                    Total: {Object.values(editingProbs).reduce((a, b) => a + (b || 0), 0)}% (should be ~100%)
-                  </p>
+                  <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>Total: {Object.values(editingProbs).reduce((a, b) => a + (b || 0), 0)}%</p>
                 </>
               )}
-              
               {!showProbabilities && (
                 <div className="space-y-2">
                   {room?.bet_options.map(opt => (
                     <div key={opt.id} className="flex items-center justify-between text-sm">
                       <span style={{ color: 'var(--text-muted)' }}>{opt.label}</span>
-                      <span className="font-mono" style={{ color: 'var(--accent-glow)' }}>
-                        {Math.round((opt.probability || 0) * 100)}%
-                      </span>
+                      <span className="font-mono" style={{ color: 'var(--accent-glow)' }}>{Math.round((opt.probability || 0) * 100)}%</span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Set Winner - for standard mode */}
             {room && room.status === 'locked' && room.game_mode !== 'horse_racing' && (
               <div className="card p-5">
-                <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>
-                  Declare Winner
-                </p>
+                <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>Declare Winner</p>
                 <div className="space-y-2">
                   {room.bet_options.map(opt => (
-                    <button key={opt.id}
-                      onClick={() => hostAction('set_winner', { option_id: opt.id })}
-                      className="w-full py-2.5 px-4 rounded-lg text-sm font-semibold text-left transition-all"
-                      style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text)' }}
-                      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--green)')}
-                      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}>
+                    <button key={opt.id} onClick={() => hostAction('set_winner', { option_id: opt.id })}
+                      className="w-full py-2.5 px-4 rounded-lg text-sm font-semibold text-left" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text)' }}>
                       🏆 {opt.label} <span style={{ color: 'var(--text-muted)' }}>×{opt.odds} ({Math.round((opt.probability || 0) * 100)}%)</span>
                     </button>
                   ))}
                 </div>
-                <button
-                  onClick={() => hostAction('select_winner_by_probability')}
-                  className="w-full mt-3 py-2.5 px-4 rounded-lg text-sm font-semibold transition-all"
-                  style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', color: 'var(--accent-glow)' }}
-                >
+                <button onClick={() => hostAction('select_winner_by_probability')} className="w-full mt-3 py-2.5 px-4 rounded-lg text-sm font-semibold" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', color: 'var(--accent-glow)' }}>
                   🎲 Auto-Select by Probability
                 </button>
               </div>
             )}
 
-            {/* Winner display */}
-            {room?.status === 'ended' && room.winner_option_id && (
+            {/* Race Results - replaces the winner box for horse racing */}
+            {raceResults && room?.game_mode === 'horse_racing' && (
+              <div className="card p-5" style={{ borderColor: 'var(--green)', background: 'rgba(34, 197, 94, 0.05)' }}>
+                <h3 className="text-lg font-black text-center mb-3" style={{ color: 'var(--green)' }}>🏆 Race Results</h3>
+                <div className="space-y-2">
+                  {raceResults.positions?.map((pos) => {
+                    const medal = pos.rank === 1 ? '🥇' : pos.rank === 2 ? '🥈' : pos.rank === 3 ? '🥉' : `${pos.rank}th`;
+                    return (
+                      <div key={pos.option_id} className="flex items-center justify-between p-2 rounded-lg" 
+                        style={{ 
+                          background: pos.is_winner ? 'rgba(34, 197, 94, 0.2)' : 'var(--bg-elevated)',
+                          border: `1px solid ${pos.is_winner ? '#22c55e' : 'var(--border)'}`
+                        }}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">{medal}</span>
+                          <span className={`font-medium ${pos.is_winner ? 'text-green-400 font-black' : ''}`}>
+                            {pos.label}
+                            {pos.is_winner && <span className="ml-2">(WINNER)</span>}
+                          </span>
+                        </div>
+                        <span className="font-mono text-sm" style={{ color: '#4ade80' }}>
+                          {pos.finish_time?.toFixed(2)}s
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-center mt-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Race Time: <span className="font-mono" style={{ color: 'var(--accent-glow)' }}>{raceResults.race_duration?.toFixed(2)}s</span>
+                </p>
+              </div>
+            )}
+
+            {/* Standard winner display for non-horse racing */}
+            {room?.status === 'ended' && room.winner_option_id && room?.game_mode !== 'horse_racing' && (
               <div className="card p-5 text-center glow-green" style={{ borderColor: 'var(--green)' }}>
                 <p className="text-2xl mb-1">🏆</p>
                 <p className="font-black text-lg" style={{ color: 'var(--green)' }}>
@@ -388,13 +384,9 @@ export default function HostPage() {
             )}
           </div>
 
-          {/* Right — Players + Bets */}
           <div className="space-y-4">
-            {/* Players */}
             <div className="card p-5">
-              <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>
-                Players
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>Players</p>
               {connectedPlayers.length === 0 ? (
                 <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Waiting for players to scan…</p>
               ) : (
@@ -402,8 +394,7 @@ export default function HostPage() {
                   {connectedPlayers.map(p => (
                     <div key={p.id} className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
-                          style={{ background: 'var(--accent-soft)', color: 'var(--accent-glow)' }}>
+                        <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: 'var(--accent-soft)', color: 'var(--accent-glow)' }}>
                           {p.name[0]?.toUpperCase()}
                         </div>
                         <span className="text-sm font-medium">{p.name}</span>
@@ -415,11 +406,8 @@ export default function HostPage() {
               )}
             </div>
 
-            {/* Recent Bets */}
             <div className="card p-5">
-              <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>
-                Bets Placed
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>Bets Placed</p>
               {room?.bets.length === 0 ? (
                 <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No bets yet</p>
               ) : (
@@ -430,9 +418,7 @@ export default function HostPage() {
                         <span className="font-medium">{b.player_name}</span>
                         <span style={{ color: 'var(--text-muted)' }}> → {b.option_label}</span>
                       </div>
-                      <span className="font-mono font-bold" style={{ color: statusColor(room?.status || '') }}>
-                        ${b.amount}
-                      </span>
+                      <span className="font-mono font-bold" style={{ color: statusColor(room?.status || '') }}>${b.amount}</span>
                     </div>
                   ))}
                 </div>
@@ -454,9 +440,7 @@ function StatRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ControlBtn({ onClick, disabled, color, children }: {
-  onClick: () => void; disabled?: boolean; color: string; children: React.ReactNode;
-}) {
+function ControlBtn({ onClick, disabled, color, children }: { onClick: () => void; disabled?: boolean; color: string; children: React.ReactNode }) {
   return (
     <button onClick={onClick} disabled={disabled}
       className="w-full py-2.5 px-4 rounded-lg text-sm font-semibold transition-all"
