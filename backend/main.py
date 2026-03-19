@@ -64,7 +64,15 @@ class CreateRoomRequest(BaseModel):
 @app.post("/api/rooms")
 async def create_room(req: CreateRoomRequest):
     host_id = str(uuid.uuid4())
-    game_mode = GameMode.HORSE_RACING if req.game_mode == "horse_racing" else GameMode.STANDARD
+    
+    # Map string game_mode to enum
+    if req.game_mode == "horse_racing":
+        game_mode = GameMode.HORSE_RACING
+    elif req.game_mode == "roulette":
+        game_mode = GameMode.ROULETTE
+    else:
+        game_mode = GameMode.STANDARD
+    
     room = game_manager.create_room(
         host_id=host_id,
         title=req.title,
@@ -193,7 +201,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str)
                 if action == "open_bets":
                     game_manager.update_game_status(room_id, GameStatus.OPEN, client_id)
                 elif action == "lock_bets":
-                    # For horse racing mode, start the race instead of just locking
+                    # For animated game modes, start the animation instead of just locking
                     if room.game_mode == GameMode.HORSE_RACING:
                         game_manager.update_game_status(room_id, GameStatus.LOCKED, client_id)
                         state = game_manager.get_room_state(room_id)
@@ -204,6 +212,19 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str)
                         # Start horse race asynchronously
                         asyncio.create_task(
                             game_manager.run_horse_race(room_id, client_id, 
+                                lambda msg: broadcast(room_id, msg))
+                        )
+                        continue  # Skip the normal broadcast below
+                    elif room.game_mode == GameMode.ROULETTE:
+                        game_manager.update_game_status(room_id, GameStatus.LOCKED, client_id)
+                        state = game_manager.get_room_state(room_id)
+                        await broadcast(room_id, {
+                            "type": WSMessageType.GAME_UPDATED,
+                            "data": {"room_state": state}
+                        })
+                        # Start roulette spin asynchronously
+                        asyncio.create_task(
+                            game_manager.run_roulette_spin(room_id, client_id,
                                 lambda msg: broadcast(room_id, msg))
                         )
                         continue  # Skip the normal broadcast below

@@ -3,7 +3,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { RoomState, WSMessage, RaceState, RacePosition, RaceResults } from '@/types/game';
+import { RoomState, WSMessage, RaceState, RacePosition, RaceResults, RouletteState } from '@/types/game';
+import RouletteWheel from '@/components/RouletteWheel';
+import { ROULETTE_COLORS } from '@/types/game';
+
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -22,6 +25,16 @@ export default function HostPage() {
     winner_id: null,
   });
   const [raceResults, setRaceResults] = useState<RaceResults | null>(null);
+  const [rouletteState, setRouletteState] = useState<RouletteState>({
+    is_spinning: false,
+    wheel_rotation: 0,
+    ball_position: 0,
+    ball_radius: 100,
+    winning_number: null,
+    winning_color: null,
+    phase: null,
+    progress: 0,
+  });
 
   useEffect(() => {
     const id = sessionStorage.getItem(`host_${roomId}`);
@@ -77,6 +90,55 @@ export default function HostPage() {
           winner_label: winner?.label || 'Unknown'
         });
       }
+    } else if (msg.type === 'roulette_started') {
+      setRouletteState({
+        is_spinning: true,
+        wheel_rotation: 0,
+        ball_position: 0,
+        ball_radius: 100,
+        winning_number: null,
+        winning_color: null,
+        phase: 'accelerating',
+        progress: 0,
+      });
+    } else if (msg.type === 'roulette_progress' || msg.type === 'roulette_ball_settling') {
+      const data = msg.data as {
+        wheel_rotation: number;
+        ball_position: number;
+        ball_radius: number;
+        phase: string;
+        progress: number;
+        countdown?: number;
+        message?: string;
+      };
+      setRouletteState(prev => ({
+        ...prev,
+        wheel_rotation: data.wheel_rotation,
+        ball_position: data.ball_position,
+        ball_radius: data.ball_radius,
+        phase: data.phase as RouletteState['phase'],
+        progress: data.progress,
+        countdown: data.countdown,
+        message: data.message,
+      }));
+    } else if (msg.type === 'roulette_ended') {
+      const data = msg.data as {
+        winning_number: string;
+        winning_number_int: number;
+        winning_color: string;
+        total_payout: number;
+        winning_bets: RouletteState['winning_bets'];
+      };
+      setRouletteState(prev => ({
+        ...prev,
+        is_spinning: false,
+        winning_number: data.winning_number,
+        winning_color: data.winning_color as 'red' | 'black' | 'green',
+        phase: 'revealing',
+        progress: 1,
+        total_payout: data.total_payout,
+        winning_bets: data.winning_bets,
+      }));
     }
   }, []);
 
@@ -154,6 +216,9 @@ export default function HostPage() {
               )}
               {room?.game_mode === 'horse_racing' && (
                 <span className="text-lg" title="Horse Racing Mode">🏇</span>
+              )}
+              {room?.game_mode === 'roulette' && (
+                <span className="text-lg" title="Roulette Mode">🎰</span>
               )}
             </div>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -243,6 +308,87 @@ export default function HostPage() {
           </div>
         )}
 
+        {/* Roulette Animation Overlay */}
+        {(rouletteState.is_spinning || rouletteState.winning_number) && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.95)' }}>
+            <div className="w-full max-w-2xl text-center">
+              {rouletteState.winning_number ? (
+                <div className="animate-in fade-in zoom-in duration-500">
+                  <h2 className="text-3xl font-black mb-6">🎰 Winning Number 🎰</h2>
+                  <div 
+                    className="w-40 h-40 mx-auto rounded-full flex flex-col items-center justify-center text-white mb-6 shadow-2xl"
+                    style={{ 
+                      background: rouletteState.winning_color === 'red' 
+                        ? '#DC2626' 
+                        : rouletteState.winning_color === 'black' 
+                          ? '#1F2937' 
+                          : '#059669',
+                      boxShadow: `0 0 80px ${rouletteState.winning_color === 'red' ? 'rgba(220, 38, 38, 0.6)' : rouletteState.winning_color === 'black' ? 'rgba(31, 41, 55, 0.6)' : 'rgba(5, 150, 105, 0.6)'}`
+                    }}
+                  >
+                    <span className="text-6xl font-black">{rouletteState.winning_number}</span>
+                    <span className="text-lg font-semibold uppercase tracking-wider mt-1">{rouletteState.winning_color}</span>
+                  </div>
+                  {rouletteState.total_payout !== undefined && rouletteState.total_payout > 0 && (
+                    <div className="card p-4 inline-block mb-6" style={{ borderColor: 'var(--green)' }}>
+                      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Total Payout</p>
+                      <p className="text-2xl font-black" style={{ color: 'var(--green)' }}>
+                        ${rouletteState.total_payout.toFixed(2)}
+                      </p>
+                    </div>
+                  )}
+                  <div className="mt-4">
+                    <button 
+                      onClick={() => setRouletteState(prev => ({ ...prev, winning_number: null, is_spinning: false }))}
+                      className="px-6 py-3 rounded-lg font-semibold transition-all"
+                      style={{ background: 'var(--accent)', color: 'white' }}
+                    >
+                      Close ✕
+                    </button>
+                  </div>
+                </div>
+              ) : rouletteState.countdown ? (
+                <div className="text-center">
+                  <div className="text-8xl font-black mb-4" style={{ color: 'var(--accent-glow)' }}>
+                    {rouletteState.countdown}
+                  </div>
+                  <p className="text-xl" style={{ color: 'var(--text-muted)' }}>
+                    {rouletteState.message}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <h2 className="text-3xl font-black text-center mb-4">🎰 Roulette Spinning 🎰</h2>
+                  <div className="flex justify-center mb-4">
+                    <RouletteWheel
+                      wheelRotation={rouletteState.wheel_rotation}
+                      ballPosition={rouletteState.ball_position}
+                      ballRadius={rouletteState.ball_radius}
+                      phase={rouletteState.phase}
+                      size={350}
+                    />
+                  </div>
+                  <div className="w-full max-w-md mx-auto h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-elevated)' }}>
+                    <div 
+                      className="h-full transition-all duration-100"
+                      style={{ 
+                        width: `${Math.round(rouletteState.progress * 100)}%`,
+                        background: 'linear-gradient(90deg, var(--accent) 0%, var(--accent-glow) 100%)'
+                      }}
+                    />
+                  </div>
+                  <p className="text-sm mt-2" style={{ color: 'var(--text-muted)' }}>
+                    {rouletteState.phase === 'accelerating' && 'Accelerating...'}
+                    {rouletteState.phase === 'spinning' && 'Spinning...'}
+                    {rouletteState.phase === 'decelerating' && 'Slowing down...'}
+                    {rouletteState.phase === 'settling' && 'Ball settling...'}
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="space-y-4">
             <div className="card p-5 text-center">
@@ -280,6 +426,7 @@ export default function HostPage() {
               </div>
             </div>
 
+            {room?.game_mode !== 'roulette' && (
             <div className="card p-5">
               <div className="flex items-center justify-between mb-4">
                 <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Win Probabilities</p>
@@ -322,6 +469,7 @@ export default function HostPage() {
                 </div>
               )}
             </div>
+            )}
 
             {room && room.status === 'locked' && room.game_mode !== 'horse_racing' && (
               <div className="card p-5">

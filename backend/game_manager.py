@@ -1,8 +1,47 @@
 import uuid
 import random
 import asyncio
+import math
 from typing import Optional
-from models import GameRoom, Player, Bet, BetOption, GameStatus, GameMode
+from models import GameRoom, Player, Bet, BetOption, GameStatus, GameMode, RouletteBetType
+
+# American Roulette wheel order (clockwise from 0)
+AMERICAN_ROULETTE_ORDER = [
+    0, 28, 9, 26, 30, 11, 7, 20, 32, 17, 5, 22, 34, 15, 3, 24, 36, 13, 1,
+    37,  # 00 represented as 37 for calculations
+    27, 10, 25, 29, 12, 8, 19, 31, 18, 6, 21, 33, 16, 4, 23, 35, 14, 2
+]
+
+# Number colors (0 and 00 are green)
+ROULETTE_COLORS = {
+    0: "green",
+    37: "green",  # 00
+    1: "red", 3: "red", 5: "red", 7: "red", 9: "red",
+    12: "red", 14: "red", 16: "red", 18: "red",
+    19: "red", 21: "red", 23: "red", 25: "red", 27: "red",
+    30: "red", 32: "red", 34: "red", 36: "red",
+    2: "black", 4: "black", 6: "black", 8: "black", 10: "black",
+    11: "black", 13: "black", 15: "black", 17: "black",
+    20: "black", 22: "black", 24: "black", 26: "black", 28: "black",
+    29: "black", 31: "black", 33: "black", 35: "black"
+}
+
+# Payouts for each bet type
+ROULETTE_PAYOUTS = {
+    RouletteBetType.SINGLE: 35,
+    RouletteBetType.RED: 1,
+    RouletteBetType.BLACK: 1,
+    RouletteBetType.EVEN: 1,
+    RouletteBetType.ODD: 1,
+    RouletteBetType.LOW: 1,
+    RouletteBetType.HIGH: 1,
+    RouletteBetType.FIRST_DOZEN: 2,
+    RouletteBetType.SECOND_DOZEN: 2,
+    RouletteBetType.THIRD_DOZEN: 2,
+    RouletteBetType.FIRST_COLUMN: 2,
+    RouletteBetType.SECOND_COLUMN: 2,
+    RouletteBetType.THIRD_COLUMN: 2,
+}
 
 
 class GameManager:
@@ -447,3 +486,270 @@ class GameManager:
             })
         
         return success, msg, winner_id
+
+    def check_roulette_win(self, bet: Bet, winning_number: int) -> bool:
+        """Check if a roulette bet wins based on the winning number."""
+        bet_type = bet.bet_type
+        bet_number = bet.bet_number
+        
+        if not bet_type:
+            # Default to checking by option_id for backwards compatibility
+            return bet.option_id == str(winning_number)
+        
+        if bet_type == RouletteBetType.SINGLE:
+            return bet_number == winning_number
+        
+        color = ROULETTE_COLORS.get(winning_number, "green")
+        
+        if bet_type == RouletteBetType.RED:
+            return color == "red"
+        elif bet_type == RouletteBetType.BLACK:
+            return color == "black"
+        elif bet_type == RouletteBetType.EVEN:
+            return winning_number != 0 and winning_number != 37 and winning_number % 2 == 0
+        elif bet_type == RouletteBetType.ODD:
+            return winning_number != 0 and winning_number != 37 and winning_number % 2 == 1
+        elif bet_type == RouletteBetType.LOW:
+            return 1 <= winning_number <= 18
+        elif bet_type == RouletteBetType.HIGH:
+            return 19 <= winning_number <= 36
+        elif bet_type == RouletteBetType.FIRST_DOZEN:
+            return 1 <= winning_number <= 12
+        elif bet_type == RouletteBetType.SECOND_DOZEN:
+            return 13 <= winning_number <= 24
+        elif bet_type == RouletteBetType.THIRD_DOZEN:
+            return 25 <= winning_number <= 36
+        elif bet_type == RouletteBetType.FIRST_COLUMN:
+            return winning_number != 0 and winning_number != 37 and winning_number % 3 == 1
+        elif bet_type == RouletteBetType.SECOND_COLUMN:
+            return winning_number != 0 and winning_number != 37 and winning_number % 3 == 2
+        elif bet_type == RouletteBetType.THIRD_COLUMN:
+            return winning_number != 0 and winning_number != 37 and winning_number % 3 == 0
+        
+        return False
+
+    async def run_roulette_spin(self, room_id: str, host_id: str, broadcast_callback) -> tuple[bool, str, Optional[int]]:
+        """Run a roulette wheel spin animation and determine the winning number."""
+        room = self.get_room(room_id)
+        if not room:
+            return False, "Room not found", None
+        if room.host_id != host_id:
+            return False, "Not authorized", None
+        
+        # Select winning number (random 0-37, where 37 represents 00)
+        winning_number = random.choice(AMERICAN_ROULETTE_ORDER)
+        winning_color = ROULETTE_COLORS.get(winning_number, "green")
+        winning_index = AMERICAN_ROULETTE_ORDER.index(winning_number)
+        
+        # Calculate final wheel position (each pocket is 360/38 = 9.47 degrees)
+        pocket_angle = 360 / 38
+        # Add some randomness within the pocket for realistic ball position
+        ball_offset = random.uniform(-pocket_angle/3, pocket_angle/3)
+        target_wheel_rotation = 360 - (winning_index * pocket_angle) + ball_offset
+        
+        # Notify roulette started
+        await broadcast_callback({
+            "type": "roulette_started",
+            "data": {
+                "wheel_numbers": AMERICAN_ROULETTE_ORDER,
+                "colors": ROULETTE_COLORS,
+                "duration": 10.0
+            }
+        })
+        
+        # Animation phases
+        phase_duration = {
+            "accelerating": 0.5,
+            "spinning": 2.0,
+            "decelerating": 3.5,
+            "settling": 1.0
+        }
+        
+        wheel_rotation = 0.0
+        ball_position = 0.0  # Angle in degrees
+        ball_radius = 100.0  # Distance from center (starts at outer track)
+        
+        # Phase 1: Accelerating
+        start_time = asyncio.get_event_loop().time()
+        while asyncio.get_event_loop().time() - start_time < phase_duration["accelerating"]:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            progress = elapsed / phase_duration["accelerating"]
+            
+            # Accelerate wheel and ball
+            wheel_rotation = progress * 720  # 2 rotations during acceleration
+            ball_position = -progress * 1080  # 3 rotations opposite direction
+            
+            await broadcast_callback({
+                "type": "roulette_progress",
+                "data": {
+                    "phase": "accelerating",
+                    "wheel_rotation": round(wheel_rotation, 2),
+                    "ball_position": round(ball_position, 2),
+                    "ball_radius": round(ball_radius, 2),
+                    "progress": progress * 0.1
+                }
+            })
+            await asyncio.sleep(0.05)
+        
+        # Phase 2: Constant speed spinning
+        wheel_velocity = 720 / phase_duration["accelerating"]  # degrees per second
+        ball_velocity = -1080 / phase_duration["accelerating"]
+        
+        start_time = asyncio.get_event_loop().time()
+        while asyncio.get_event_loop().time() - start_time < phase_duration["spinning"]:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            
+            wheel_rotation += wheel_velocity * 0.05
+            ball_position += ball_velocity * 0.05
+            
+            await broadcast_callback({
+                "type": "roulette_progress",
+                "data": {
+                    "phase": "spinning",
+                    "wheel_rotation": round(wheel_rotation % 360, 2),
+                    "ball_position": round(ball_position % 360, 2),
+                    "ball_radius": round(ball_radius, 2),
+                    "progress": 0.1 + (elapsed / phase_duration["spinning"]) * 0.3
+                }
+            })
+            await asyncio.sleep(0.05)
+        
+        # Phase 3: Decelerating + ball dropping
+        start_time = asyncio.get_event_loop().time()
+        deceleration_duration = phase_duration["decelerating"]
+        
+        # Calculate how many more rotations to reach target
+        current_wheel_pos = wheel_rotation % 360
+        rotations_needed = 3  # At least 3 more rotations
+        total_rotation_needed = rotations_needed * 360 + (target_wheel_rotation - current_wheel_pos) % 360
+        
+        # Deceleration curve (ease out)
+        while asyncio.get_event_loop().time() - start_time < deceleration_duration:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            t = elapsed / deceleration_duration
+            
+            # Ease out cubic
+            ease = 1 - pow(1 - t, 3)
+            
+            wheel_rotation = current_wheel_pos + total_rotation_needed * ease
+            
+            # Ball slows faster and drops inward
+            ball_velocity *= 0.985  # Friction
+            ball_position += ball_velocity * 0.05
+            
+            # Ball drops inward as it slows
+            ball_radius = 100 - (ease * 40) + random.uniform(-2, 2)  # Bounces slightly
+            
+            await broadcast_callback({
+                "type": "roulette_progress",
+                "data": {
+                    "phase": "decelerating",
+                    "wheel_rotation": round(wheel_rotation % 360, 2),
+                    "ball_position": round(ball_position % 360, 2),
+                    "ball_radius": round(max(45, ball_radius), 2),
+                    "progress": 0.4 + t * 0.4
+                }
+            })
+            await asyncio.sleep(0.05)
+        
+        # Phase 4: Ball settling into pocket
+        start_time = asyncio.get_event_loop().time()
+        final_wheel_pos = target_wheel_rotation % 360
+        
+        while asyncio.get_event_loop().time() - start_time < phase_duration["settling"]:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            t = elapsed / phase_duration["settling"]
+            
+            # Small bounces as ball settles
+            bounce = math.sin(t * math.pi * 4) * (1 - t) * 3
+            
+            wheel_rotation = final_wheel_pos + bounce
+            ball_position = (winning_index * pocket_angle) + ball_offset + bounce
+            ball_radius = 60  # In the pocket
+            
+            await broadcast_callback({
+                "type": "roulette_ball_settling",
+                "data": {
+                    "phase": "settling",
+                    "wheel_rotation": round(wheel_rotation, 2),
+                    "ball_position": round(ball_position, 2),
+                    "ball_radius": round(ball_radius, 2),
+                    "progress": 0.8 + t * 0.15
+                }
+            })
+            await asyncio.sleep(0.05)
+        
+        # Countdown before revealing
+        for count in [3, 2, 1]:
+            await broadcast_callback({
+                "type": "roulette_progress",
+                "data": {
+                    "phase": "revealing",
+                    "countdown": count,
+                    "wheel_rotation": round(final_wheel_pos, 2),
+                    "ball_position": round(winning_index * pocket_angle + ball_offset, 2),
+                    "ball_radius": 60,
+                    "progress": 0.95 + (4 - count) * 0.017,
+                    "message": f"Revealing in {count}..."
+                }
+            })
+            await asyncio.sleep(1)
+        
+        # Set the winner and calculate payouts
+        room.status = GameStatus.ENDED
+        
+        # Find or create the winning option
+        winning_option_id = None
+        for opt in room.bet_options:
+            if opt.label == str(winning_number) or opt.id == str(winning_number):
+                winning_option_id = opt.id
+                room.winner_option_id = opt.id
+                break
+        
+        # If no matching option found, use first option as winner (fallback)
+        if not winning_option_id and room.bet_options:
+            winning_option_id = room.bet_options[0].id
+            room.winner_option_id = winning_option_id
+        
+        # Pay out winners based on roulette rules
+        total_payout = 0
+        winning_bets = []
+        
+        for bet in room.bets:
+            if self.check_roulette_win(bet, winning_number):
+                # Calculate payout based on bet type
+                bet_type = bet.bet_type or RouletteBetType.SINGLE
+                payout_multiplier = ROULETTE_PAYOUTS.get(bet_type, 35)
+                payout = bet.amount * (payout_multiplier + 1)  # Return bet + winnings
+                
+                player = room.players.get(bet.player_id)
+                if player:
+                    player.balance += payout
+                    total_payout += payout
+                    winning_bets.append({
+                        "player_id": bet.player_id,
+                        "player_name": bet.player_name,
+                        "bet_amount": bet.amount,
+                        "payout": payout,
+                        "bet_type": bet_type.value
+                    })
+        
+        # Display name for winning number
+        display_number = "00" if winning_number == 37 else str(winning_number)
+        
+        await broadcast_callback({
+            "type": "roulette_ended",
+            "data": {
+                "winning_number": display_number,
+                "winning_number_int": winning_number,
+                "winning_color": winning_color,
+                "winning_option_id": winning_option_id,
+                "wheel_rotation": round(final_wheel_pos, 2),
+                "ball_position": round(winning_index * pocket_angle + ball_offset, 2),
+                "total_payout": round(total_payout, 2),
+                "winning_bets": winning_bets,
+                "room_state": self.get_room_state(room_id)
+            }
+        })
+        
+        return True, f"Roulette spin complete! Winning number: {display_number} ({winning_color})", winning_number

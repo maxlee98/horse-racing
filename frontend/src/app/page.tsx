@@ -11,7 +11,7 @@ interface BetOptionInput {
   odds: number;
 }
 
-type GameMode = 'standard' | 'horse_racing';
+type GameMode = 'standard' | 'horse_racing' | 'roulette';
 
 const HORSE_RACING_PRESET: BetOptionInput[] = [
   { id: '1', label: '🐎 Thunder Bolt', odds: 2.5 },
@@ -19,6 +19,28 @@ const HORSE_RACING_PRESET: BetOptionInput[] = [
   { id: '3', label: '🐎 Golden Mane', odds: 2.0 },
   { id: '4', label: '🐎 Silver Streak', odds: 4.0 },
   { id: '5', label: '🐎 Wild Spirit', odds: 3.5 },
+];
+
+const ROULETTE_PRESET: BetOptionInput[] = [
+  // Individual numbers (0, 00, 1-36)
+  { id: '0', label: '0', odds: 36 },
+  { id: '00', label: '00', odds: 36 },
+  ...Array.from({ length: 36 }, (_, i) => ({ id: String(i + 1), label: String(i + 1), odds: 36 })),
+  // Even money bets
+  { id: 'red', label: 'Red', odds: 2 },
+  { id: 'black', label: 'Black', odds: 2 },
+  { id: 'even', label: 'Even', odds: 2 },
+  { id: 'odd', label: 'Odd', odds: 2 },
+  { id: '1-18', label: '1-18 (Low)', odds: 2 },
+  { id: '19-36', label: '19-36 (High)', odds: 2 },
+  // Dozens
+  { id: '1st12', label: '1st 12', odds: 3 },
+  { id: '2nd12', label: '2nd 12', odds: 3 },
+  { id: '3rd12', label: '3rd 12', odds: 3 },
+  // Columns
+  { id: 'col1', label: 'Column 1', odds: 3 },
+  { id: 'col2', label: 'Column 2', odds: 3 },
+  { id: 'col3', label: 'Column 3', odds: 3 },
 ];
 
 export default function HomePage() {
@@ -96,6 +118,13 @@ export default function HomePage() {
     setUseRandomizedProbabilities(false);
   };
 
+  const loadRoulettePreset = () => {
+    setGameMode('roulette');
+    setTitle('🎰 Roulette');
+    setOptions(ROULETTE_PRESET.map(o => ({ ...o })));
+    setUseRandomizedProbabilities(false);
+  };
+
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-6">
       {/* Header */}
@@ -154,7 +183,7 @@ export default function HomePage() {
             <label className="block text-sm font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>
               GAME MODE
             </label>
-            <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="grid grid-cols-3 gap-3 mb-4">
               <button
                 onClick={loadStandardPreset}
                 className="p-3 rounded-lg text-sm font-medium transition-all"
@@ -179,6 +208,18 @@ export default function HomePage() {
                 <span className="text-lg">🏇</span>
                 <div className="mt-1">Horse Racing</div>
               </button>
+              <button
+                onClick={loadRoulettePreset}
+                className="p-3 rounded-lg text-sm font-medium transition-all"
+                style={{ 
+                  background: gameMode === 'roulette' ? 'var(--accent-soft)' : 'var(--bg-elevated)', 
+                  border: `1px solid ${gameMode === 'roulette' ? 'var(--accent)' : 'var(--border)'}`,
+                  color: gameMode === 'roulette' ? 'var(--accent-glow)' : 'var(--text-muted)'
+                }}
+              >
+                <span className="text-lg">🎰</span>
+                <div className="mt-1">Roulette</div>
+              </button>
             </div>
             {gameMode === 'horse_racing' && (
               <div className="p-3 rounded-lg text-xs mb-4" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
@@ -186,54 +227,62 @@ export default function HomePage() {
                 Winner is selected based on configured probabilities. Great for visual excitement!
               </div>
             )}
+            {gameMode === 'roulette' && (
+              <div className="p-3 rounded-lg text-xs mb-4" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                🎰 <strong>Roulette Mode:</strong> American Roulette with a spinning wheel and ball animation. 
+                Bet on numbers, colors, or ranges. 38 pockets (0, 00, 1-36) with realistic physics!
+              </div>
+            )}
           </div>
 
-          {/* Bet Options */}
-          <div>
-            <label className="block text-sm font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>
-              BET OPTIONS
-            </label>
-            <div className="space-y-2">
-              {options.map((opt, i) => (
-                <div key={opt.id} className="flex items-center gap-2">
-                  <input
-                    className="flex-1 px-3 py-2.5 rounded-lg text-sm outline-none"
-                    style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text)' }}
-                    placeholder={`Option ${i + 1} label`}
-                    value={opt.label}
-                    onChange={e => updateOption(i, 'label', e.target.value)}
-                  />
-                  <div className="flex items-center gap-1 px-3 py-2.5 rounded-lg text-sm"
-                    style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>×</span>
+          {/* Bet Options - Hidden for Roulette */}
+          {gameMode !== 'roulette' && (
+            <div>
+              <label className="block text-sm font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>
+                BET OPTIONS
+              </label>
+              <div className="space-y-2">
+                {options.map((opt, i) => (
+                  <div key={opt.id} className="flex items-center gap-2">
                     <input
-                      type="number"
-                      step="0.1"
-                      min="1.1"
-                      className="w-14 bg-transparent outline-none text-center"
-                      style={{ color: 'var(--accent-glow)' }}
-                      value={opt.odds}
-                      onChange={e => updateOption(i, 'odds', parseFloat(e.target.value))}
+                      className="flex-1 px-3 py-2.5 rounded-lg text-sm outline-none"
+                      style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                      placeholder={`Option ${i + 1} label`}
+                      value={opt.label}
+                      onChange={e => updateOption(i, 'label', e.target.value)}
                     />
+                    <div className="flex items-center gap-1 px-3 py-2.5 rounded-lg text-sm"
+                      style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>×</span>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="1.1"
+                        className="w-14 bg-transparent outline-none text-center"
+                        style={{ color: 'var(--accent-glow)' }}
+                        value={opt.odds}
+                        onChange={e => updateOption(i, 'odds', parseFloat(e.target.value))}
+                      />
+                    </div>
+                    {options.length > 2 && (
+                      <button
+                        onClick={() => removeOption(i)}
+                        className="w-9 h-9 flex items-center justify-center rounded-lg transition-colors"
+                        style={{ background: 'var(--red-soft)', color: 'var(--red)' }}
+                      >✕</button>
+                    )}
                   </div>
-                  {options.length > 2 && (
-                    <button
-                      onClick={() => removeOption(i)}
-                      className="w-9 h-9 flex items-center justify-center rounded-lg transition-colors"
-                      style={{ background: 'var(--red-soft)', color: 'var(--red)' }}
-                    >✕</button>
-                  )}
-                </div>
-              ))}
+                ))}
+              </div>
+              <button
+                onClick={addOption}
+                className="mt-3 w-full py-2 rounded-lg text-sm font-medium transition-colors"
+                style={{ border: '1px dashed var(--border)', color: 'var(--text-muted)' }}
+              >
+                + Add Option
+              </button>
             </div>
-            <button
-              onClick={addOption}
-              className="mt-3 w-full py-2 rounded-lg text-sm font-medium transition-colors"
-              style={{ border: '1px dashed var(--border)', color: 'var(--text-muted)' }}
-            >
-              + Add Option
-            </button>
-          </div>
+          )}
 
           {error && (
             <div className="px-4 py-3 rounded-lg text-sm" style={{ background: 'var(--red-soft)', color: 'var(--red)' }}>

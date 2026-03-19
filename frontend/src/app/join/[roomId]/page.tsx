@@ -3,7 +3,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { RoomState, WSMessage, Bet, RaceState, RacePosition } from '@/types/game';
+import { RoomState, WSMessage, Bet, RaceState, RacePosition, RouletteState, RouletteBetType } from '@/types/game';
+import RouletteWheel from '@/components/RouletteWheel';
+import RouletteTable from '@/components/RouletteTable';
 
 export default function JoinPage() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -30,6 +32,18 @@ export default function JoinPage() {
     progress: 0,
     winner_id: null,
   });
+  const [rouletteState, setRouletteState] = useState<RouletteState>({
+    is_spinning: false,
+    wheel_rotation: 0,
+    ball_position: 0,
+    ball_radius: 100,
+    winning_number: null,
+    winning_color: null,
+    phase: null,
+    progress: 0,
+  });
+  const [selectedBetType, setSelectedBetType] = useState<RouletteBetType | null>(null);
+  const [selectedNumber, setSelectedNumber] = useState<number | undefined>(undefined);
   const notifTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const notify = (msg: string) => {
@@ -94,6 +108,55 @@ export default function JoinPage() {
         winner_id,
       }));
       notify(`🏆 ${winner_label} won the race!`);
+    }
+
+    // Handle roulette messages
+    if (msg.type === 'roulette_started') {
+      setRouletteState({
+        is_spinning: true,
+        wheel_rotation: 0,
+        ball_position: 0,
+        ball_radius: 100,
+        winning_number: null,
+        winning_color: null,
+        phase: 'accelerating',
+        progress: 0,
+      });
+    } else if (msg.type === 'roulette_progress' || msg.type === 'roulette_ball_settling') {
+      const data = msg.data as {
+        wheel_rotation: number;
+        ball_position: number;
+        ball_radius: number;
+        phase: string;
+        progress: number;
+        countdown?: number;
+        message?: string;
+      };
+      setRouletteState(prev => ({
+        ...prev,
+        wheel_rotation: data.wheel_rotation,
+        ball_position: data.ball_position,
+        ball_radius: data.ball_radius,
+        phase: data.phase as RouletteState['phase'],
+        progress: data.progress,
+        countdown: data.countdown,
+        message: data.message,
+      }));
+    } else if (msg.type === 'roulette_ended') {
+      const data = msg.data as {
+        winning_number: string;
+        winning_number_int: number;
+        winning_color: string;
+      };
+      setRouletteState(prev => ({
+        ...prev,
+        is_spinning: false,
+        winning_number: data.winning_number,
+        winning_color: data.winning_color as 'red' | 'black' | 'green',
+        phase: 'revealing',
+        progress: 1,
+      }));
+      notify(`🎰 ${data.winning_number} ${data.winning_color} wins!`);
     }
   }, [playerId]);
 
@@ -257,7 +320,24 @@ export default function JoinPage() {
         )}
 
         {/* Bet Options */}
-        {room?.status !== 'ended' && (
+        {room?.status !== 'ended' && room?.game_mode === 'roulette' && (
+          <div className="mb-5">
+            <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>Choose Your Bet</p>
+            <RouletteTable
+              selectedOption={selectedOption}
+              onSelectOption={(optionId, betType, betNumber) => {
+                setSelectedOption(optionId);
+                setSelectedBetType(betType);
+                setSelectedNumber(betNumber);
+              }}
+              disabled={room.status !== 'open'}
+              betOptions={room.bet_options}
+            />
+          </div>
+        )}
+
+        {/* Standard Bet Options (non-roulette) */}
+        {room?.status !== 'ended' && room?.game_mode !== 'roulette' && (
           <div className="space-y-3 mb-5">
             <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Choose Your Bet</p>
             {room?.bet_options.map(opt => {
