@@ -1,5 +1,6 @@
 import uuid
 import json
+import asyncio
 import qrcode
 import io
 import base64
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from game_manager import GameManager
-from models import GameStatus, WSMessageType
+from models import GameStatus, WSMessageType, GameMode
 
 app = FastAPI(title="Live Betting Game API")
 
@@ -56,22 +57,41 @@ class CreateRoomRequest(BaseModel):
     title: str = "Live Betting Game"
     description: str = ""
     bet_options: list[dict] = []
+    game_mode: str = "standard"
+    use_randomized_probabilities: bool = False
 
 
 @app.post("/api/rooms")
 async def create_room(req: CreateRoomRequest):
     host_id = str(uuid.uuid4())
+    game_mode = GameMode.HORSE_RACING if req.game_mode == "horse_racing" else GameMode.STANDARD
     room = game_manager.create_room(
         host_id=host_id,
         title=req.title,
         description=req.description,
         bet_options=req.bet_options,
+        game_mode=game_mode,
+        use_randomized_probabilities=req.use_randomized_probabilities,
     )
     return {
         "room_id": room.room_id,
         "host_id": host_id,
         "status": room.status,
+        "game_mode": room.game_mode.value,
     }
+
+
+class UpdateProbabilitiesRequest(BaseModel):
+    probabilities: dict[str, float]
+    host_id: str
+
+
+@app.post("/api/rooms/{room_id}/probabilities")
+async def update_probabilities(room_id: str, req: UpdateProbabilitiesRequest):
+    success, message = game_manager.update_probabilities(room_id, req.probabilities, req.host_id)
+    if not success:
+        raise HTTPException(status_code=403, detail=message)
+    return {"success": True, "message": message}
 
 
 @app.get("/api/rooms/{room_id}")
@@ -173,7 +193,22 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str)
                 if action == "open_bets":
                     game_manager.update_game_status(room_id, GameStatus.OPEN, client_id)
                 elif action == "lock_bets":
-                    game_manager.update_game_status(room_id, GameStatus.LOCKED, client_id)
+                    # For horse racing mode, start the race instead of just locking
+                    if room.game_mode == GameMode.HORSE_RACING:
+                        game_manager.update_game_status(room_id, GameStatus.LOCKED, client_id)
+                        state = game_manager.get_room_state(room_id)
+                        await broadcast(room_id, {
+                            "type": WSMessageType.GAME_UPDATED,
+                            "data": {"room_state": state}
+                        })
+                        # Start horse race asynchronously
+                        asyncio.create_task(
+                            game_manager.run_horse_race(room_id, client_id, 
+                                lambda msg: broadcast(room_id, msg))
+                        )
+                        continue  # Skip the normal broadcast below
+                    else:
+                        game_manager.update_game_status(room_id, GameStatus.LOCKED, client_id)
                 elif action == "set_winner":
                     option_id = data.get("option_id")
                     success, msg_text = game_manager.set_winner(room_id, option_id, client_id)
@@ -186,14 +221,47 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str)
                 elif action == "update_options":
                     options = data.get("bet_options", [])
                     game_manager.update_bet_options(room_id, options, client_id)
-                elif action == "reset":
-                    game_manager.update_game_status(room_id, GameStatus.WAITING, client_id)
-                    room2 = game_manager.get_room(room_id)
-                    if room2:
-                        room2.bets = []
-                        room2.winner_option_id = None
-                        for p in room2.players.values():
-                            p.balance = 1000.0
+                elif action == "update_probabilities":
+                    probabilities = data.get("probabilities", {})
+                    success, msg_text = game_manager.update_probabilities(room_id, probabilities, client_id)
+                    if not success:
+                        await websocket.send_json({
+                            "type": WSMessageType.ERROR,
+                            "data": {"message": msg_text}
+                        })
+                        continue
+                elif action == "randomize_probabilities":
+                    success, msg_text = game_manager.randomize_probabilities(room_id, client_id)
+                    if not success:
+                        await websocket.send_json({
+                            "type": WSMessageType.ERROR,
+                            "data": {"message": msg_text}
+                        })
+                        continue
+                elif action == "next_round":
+                    success, msg_text = game_manager.next_round(room_id, client_id)
+                    if not success:
+                        await websocket.send_json({
+                            "type": WSMessageType.ERROR,
+                            "data": {"message": msg_text}
+                        })
+                        continue
+                elif action == "reset_lobby":
+                    success, msg_text = game_manager.reset_lobby(room_id, client_id)
+                    if not success:
+                        await websocket.send_json({
+                            "type": WSMessageType.ERROR,
+                            "data": {"message": msg_text}
+                        })
+                        continue
+                elif action == "select_winner_by_probability":
+                    success, msg_text, winner_id = game_manager.select_winner_by_probability(room_id, client_id)
+                    if not success:
+                        await websocket.send_json({
+                            "type": WSMessageType.ERROR,
+                            "data": {"message": msg_text}
+                        })
+                        continue
 
                 state = game_manager.get_room_state(room_id)
                 await broadcast(room_id, {

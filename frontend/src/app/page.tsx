@@ -11,16 +11,28 @@ interface BetOptionInput {
   odds: number;
 }
 
+type GameMode = 'standard' | 'horse_racing';
+
+const HORSE_RACING_PRESET: BetOptionInput[] = [
+  { id: '1', label: '🐎 Thunder Bolt', odds: 2.5 },
+  { id: '2', label: '🐎 Midnight Runner', odds: 3.0 },
+  { id: '3', label: '🐎 Golden Mane', odds: 2.0 },
+  { id: '4', label: '🐎 Silver Streak', odds: 4.0 },
+  { id: '5', label: '🐎 Wild Spirit', odds: 3.5 },
+];
+
 export default function HomePage() {
   const router = useRouter();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [gameMode, setGameMode] = useState<GameMode>('standard');
   const [options, setOptions] = useState<BetOptionInput[]>([
     { id: '1', label: 'Team A', odds: 1.8 },
     { id: '2', label: 'Team B', odds: 2.1 },
   ]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [useRandomizedProbabilities, setUseRandomizedProbabilities] = useState(false);
 
   const addOption = () => {
     setOptions([...options, { id: String(Date.now()), label: '', odds: 2.0 }]);
@@ -48,7 +60,13 @@ export default function HomePage() {
       const res = await fetch(`${API}/api/rooms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, description, bet_options: options }),
+        body: JSON.stringify({ 
+          title: title || (gameMode === 'horse_racing' ? '🏇 Horse Racing' : 'Live Betting Game'), 
+          description, 
+          bet_options: options,
+          game_mode: gameMode,
+          use_randomized_probabilities: useRandomizedProbabilities,
+        }),
       });
       const data = await res.json();
       // Store host_id in sessionStorage so the host page can use it
@@ -59,6 +77,23 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadHorseRacingPreset = () => {
+    setGameMode('horse_racing');
+    setTitle('🏇 Horse Racing');
+    setOptions(HORSE_RACING_PRESET.map(o => ({ ...o })));
+    setUseRandomizedProbabilities(true);
+  };
+
+  const loadStandardPreset = () => {
+    setGameMode('standard');
+    setTitle('');
+    setOptions([
+      { id: '1', label: 'Team A', odds: 1.8 },
+      { id: '2', label: 'Team B', odds: 2.1 },
+    ]);
+    setUseRandomizedProbabilities(false);
   };
 
   return (
@@ -112,6 +147,45 @@ export default function HomePage() {
               value={description}
               onChange={e => setDescription(e.target.value)}
             />
+          </div>
+
+          {/* Game Mode / Presets */}
+          <div>
+            <label className="block text-sm font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>
+              GAME MODE
+            </label>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <button
+                onClick={loadStandardPreset}
+                className="p-3 rounded-lg text-sm font-medium transition-all"
+                style={{ 
+                  background: gameMode === 'standard' ? 'var(--accent-soft)' : 'var(--bg-elevated)', 
+                  border: `1px solid ${gameMode === 'standard' ? 'var(--accent)' : 'var(--border)'}`,
+                  color: gameMode === 'standard' ? 'var(--accent-glow)' : 'var(--text-muted)'
+                }}
+              >
+                <span className="text-lg">🎲</span>
+                <div className="mt-1">Standard</div>
+              </button>
+              <button
+                onClick={loadHorseRacingPreset}
+                className="p-3 rounded-lg text-sm font-medium transition-all"
+                style={{ 
+                  background: gameMode === 'horse_racing' ? 'var(--accent-soft)' : 'var(--bg-elevated)', 
+                  border: `1px solid ${gameMode === 'horse_racing' ? 'var(--accent)' : 'var(--border)'}`,
+                  color: gameMode === 'horse_racing' ? 'var(--accent-glow)' : 'var(--text-muted)'
+                }}
+              >
+                <span className="text-lg">🏇</span>
+                <div className="mt-1">Horse Racing</div>
+              </button>
+            </div>
+            {gameMode === 'horse_racing' && (
+              <div className="p-3 rounded-lg text-xs mb-4" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                🎮 <strong>Horse Racing Mode:</strong> Horses race across the screen when bets are locked. 
+                Winner is selected based on configured probabilities. Great for visual excitement!
+              </div>
+            )}
           </div>
 
           {/* Bet Options */}

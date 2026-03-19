@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { RoomState, WSMessage, Bet } from '@/types/game';
+import { RoomState, WSMessage, Bet, RaceState, RacePosition } from '@/types/game';
 
 export default function JoinPage() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -24,6 +24,12 @@ export default function JoinPage() {
   const [betAmount, setBetAmount] = useState('100');
   const [myBets, setMyBets] = useState<Bet[]>([]);
   const [notification, setNotification] = useState('');
+  const [raceState, setRaceState] = useState<RaceState>({
+    is_racing: false,
+    positions: [],
+    progress: 0,
+    winner_id: null,
+  });
   const notifTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const notify = (msg: string) => {
@@ -55,6 +61,39 @@ export default function JoinPage() {
     }
     if (msg.type === 'error') {
       notify(`❌ ${(msg.data as { message: string }).message}`);
+    }
+
+    // Handle horse racing messages
+    if (msg.type === 'race_started') {
+      const horses = (msg.data as { horses: Array<{ id: string; label: string; probability: number }> }).horses;
+      setRaceState({
+        is_racing: true,
+        positions: horses.map(h => ({ option_id: h.id, label: h.label, position: 0, probability: h.probability })),
+        progress: 0,
+        winner_id: null,
+      });
+    } else if (msg.type === 'race_progress') {
+      const { positions, progress, countdown, message } = msg.data as { 
+        positions: RacePosition[]; 
+        progress: number;
+        countdown?: number;
+        message?: string;
+      };
+      setRaceState(prev => ({
+        ...prev,
+        positions,
+        progress,
+        countdown,
+        message,
+      }));
+    } else if (msg.type === 'race_ended') {
+      const { winner_id, winner_label } = msg.data as { winner_id: string; winner_label: string };
+      setRaceState(prev => ({
+        ...prev,
+        is_racing: false,
+        winner_id,
+      }));
+      notify(`🏆 ${winner_label} won the race!`);
     }
   }, [playerId]);
 
@@ -122,10 +161,64 @@ export default function JoinPage() {
           </div>
         )}
 
+        {/* Horse Racing Animation Overlay */}
+        {raceState.is_racing && (
+          <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.95)' }}>
+            <div className="w-full max-w-md">
+              {/* Countdown Display */}
+              {raceState.countdown ? (
+                <div className="text-center">
+                  <div className="text-8xl font-black mb-4" style={{ color: 'var(--accent-glow)' }}>
+                    {raceState.countdown}
+                  </div>
+                  <p className="text-xl" style={{ color: 'var(--text-muted)' }}>
+                    {raceState.message}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <h2 className="text-2xl font-black text-center mb-6">🏇 The Race is On! 🏇</h2>
+                  <div className="space-y-3">
+                    {raceState.positions.map((pos) => (
+                      <div key={pos.option_id} className="relative">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-medium flex-1 truncate">{pos.label}</span>
+                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                            ×{room?.bet_options.find(o => o.id === pos.option_id)?.odds.toFixed(1)}
+                          </span>
+                        </div>
+                        <div className="h-6 rounded-full overflow-hidden" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+                          <div 
+                            className="h-full transition-all duration-300 ease-linear flex items-center justify-end pr-1"
+                            style={{ 
+                              width: `${pos.position}%`,
+                              background: `linear-gradient(90deg, var(--accent) 0%, var(--accent-glow) 100%)`,
+                            }}
+                          >
+                            <span>🐎</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 text-center">
+                    <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                      Race Progress: {Math.round(raceState.progress * 100)}%
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h1 className="text-lg font-black truncate">{room?.title || '...'}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-black truncate">{room?.title || '...'}</h1>
+              {room?.game_mode === 'horse_racing' && <span>🏇</span>}
+            </div>
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
               {room ? `${room.player_count} players connected` : 'Loading...'}
             </p>
@@ -176,8 +269,8 @@ export default function JoinPage() {
                     </div>
                   </div>
                   <div className="flex items-center justify-between mt-2">
-                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Total pooled</span>
-                    <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>${totalOnOption.toFixed(0)}</span>
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Win chance: {Math.round((opt.probability || 0) * 100)}%</span>
+                    <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>${totalOnOption.toFixed(0)} pooled</span>
                   </div>
                 </button>
               );
@@ -223,11 +316,18 @@ export default function JoinPage() {
             <p>Waiting for host to open bets...</p>
           </div>
         )}
-        {room?.status === 'locked' && (
+        {room?.status === 'locked' && room?.game_mode !== 'horse_racing' && (
           <div className="text-center py-8" style={{ color: 'var(--amber)' }}>
             <div className="text-4xl mb-2">🔒</div>
             <p className="font-bold">Bets are locked!</p>
             <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Waiting for the result...</p>
+          </div>
+        )}
+        {room?.status === 'locked' && room?.game_mode === 'horse_racing' && !raceState.is_racing && (
+          <div className="text-center py-8" style={{ color: 'var(--amber)' }}>
+            <div className="text-4xl mb-2">🏇</div>
+            <p className="font-bold">Get ready!</p>
+            <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>The race is about to start...</p>
           </div>
         )}
 

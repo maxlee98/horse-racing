@@ -14,6 +14,12 @@ class BetOption(BaseModel):
     id: str
     label: str
     odds: float = 2.0
+    probability: float = 0.5  # Win probability (0-1), used for randomized winner selection
+
+
+class GameMode(str, Enum):
+    STANDARD = "standard"
+    HORSE_RACING = "horse_racing"
 
 
 class Player(BaseModel):
@@ -43,6 +49,9 @@ class GameRoom(BaseModel):
     bets: list[Bet] = []
     winner_option_id: Optional[str] = None
     max_players: int = 8
+    game_mode: GameMode = GameMode.STANDARD
+    round_number: int = 1
+    use_randomized_probabilities: bool = False  # Whether to use probability-based winner selection
 
 
 # WebSocket message types
@@ -60,3 +69,6 @@ class WSMessageType(str, Enum):
     GAME_UPDATED = "game_updated"
     GAME_ENDED = "game_ended"
     ERROR = "error"
+    RACE_STARTED = "race_started"  # For horse racing mode
+    RACE_PROGRESS = "race_progress"  # Race animation updates
+    RACE_ENDED = "race_ended"  # Race finished with winner

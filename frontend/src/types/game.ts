@@ -1,9 +1,18 @@
 export type GameStatus = 'waiting' | 'open' | 'locked' | 'ended';
+export type GameMode = 'standard' | 'horse_racing';
 
 export interface BetOption {
   id: string;
   label: string;
   odds: number;
+  probability: number;  // Win probability (0-1)
+}
+
+export interface RacePosition {
+  option_id: string;
+  label: string;
+  position: number;  // 0-100 race progress
+  probability: number;
 }
 
 export interface Player {
@@ -33,6 +42,18 @@ export interface RoomState {
   winner_option_id: string | null;
   max_players: number;
   player_count: number;
+  game_mode: GameMode;
+  round_number: number;
+  use_randomized_probabilities: boolean;
+}
+
+export interface RaceState {
+  is_racing: boolean;
+  positions: RacePosition[];
+  progress: number;
+  winner_id: string | null;
+  countdown?: number;
+  message?: string;
 }
 
 export type WSMessageType =
@@ -45,7 +66,10 @@ export type WSMessageType =
   | 'bet_placed'
   | 'game_updated'
   | 'game_ended'
-  | 'error';
+  | 'error'
+  | 'race_started'
+  | 'race_progress'
+  | 'race_ended';
 
 export interface WSMessage {
   type: WSMessageType;
