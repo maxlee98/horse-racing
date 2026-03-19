@@ -357,7 +357,6 @@ export default function HostPage() {
                           <span className="text-lg">{medal}</span>
                           <span className={`font-medium ${pos.is_winner ? 'text-green-400 font-black' : ''}`}>
                             {pos.label}
-                            {pos.is_winner && <span className="ml-2">(WINNER)</span>}
                           </span>
                         </div>
                         <span className="font-mono text-sm" style={{ color: '#4ade80' }}>
