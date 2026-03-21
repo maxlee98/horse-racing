@@ -115,7 +115,9 @@ class BettingService:
                         "player_name": bet.player_name,
                         "bet_amount": bet.amount,
                         "payout": payout,
-                        "bet_type": bet.bet_type.value if bet.bet_type else "single"
+                        "bet_type": bet.bet_type.value if bet.bet_type else "single",
+                        "option_id": bet.option_id,
+
                     })
         
         self._room_service._repo.save(room)

@@ -755,7 +755,8 @@ class GameManager:
                         "player_name": bet.player_name,
                         "bet_amount": bet.amount,
                         "payout": payout,
-                        "bet_type": bet_type.value
+                        "bet_type": bet_type.value,
+                        "option_id": bet.option_id, 
                     })
         
         # Display name for winning number

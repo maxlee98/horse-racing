@@ -316,8 +316,30 @@ async def _handle_host_action(
                 )
                 
                 if success and winning_value is not None:
-                    # Process payouts based on the winning value
-                    winning_bets = betting_service.process_payouts(room, winning_value)
+                    # For roulette, winning_value is a dict with winning data
+                    # Extract the winning number for payout processing
+                    if isinstance(winning_value, dict):
+                        winning_number = winning_value["winning_number_int"]
+                        winning_data = winning_value
+                    else:
+                        winning_number = winning_value
+                        winning_data = {"winning_number": str(winning_value)}
+                    
+                    # Process payouts based on the winning number
+                    winning_bets = betting_service.process_payouts(room, winning_number)
+                    
+                    # For roulette, broadcast roulette_ended with winning_bets
+                    if room.game_mode == GameMode.ROULETTE:
+                        await ws_manager.broadcast(room_id, {
+                            "type": WSMessageType.ROULETTE_ENDED,
+                            "data": {
+                                "winning_number": winning_data["winning_number"],
+                                "winning_number_int": winning_data["winning_number_int"],
+                                "winning_color": winning_data["winning_color"],
+                                "winning_option_id": winning_data["winning_option_id"],
+                                "winning_bets": winning_bets,
+                            }
+                        })
                     
                     # Broadcast game ended with winning bets
                     await ws_manager.broadcast(room_id, {

@@ -67,7 +67,7 @@ class RouletteMode(GameModeStrategy):
         self,
         room: GameRoom,
         broadcast: Callable[[dict], Any]
-    ) -> tuple[bool, str, Optional[str]]:
+    ) -> tuple[bool, str, Optional[Any]]:
         """Run roulette wheel spin animation."""
         # Select winning number
         winning_number = random.choice(AMERICAN_ROULETTE_ORDER)
@@ -118,17 +118,13 @@ class RouletteMode(GameModeStrategy):
         
         display_number = "00" if winning_number == 37 else str(winning_number)
         
-        await broadcast({
-            "type": "roulette_ended",
-            "data": {
-                "winning_number": display_number,
-                "winning_number_int": winning_number,
-                "winning_color": winning_color,
-                "winning_option_id": winning_option_id,
-            }
-        })
-        
-        return True, f"Roulette spin complete! Winning number: {display_number} ({winning_color})", winning_option_id
+        # Return winning data for main.py to broadcast after processing payouts
+        return True, f"Roulette spin complete! Winning number: {display_number} ({winning_color})", {
+            "winning_number": display_number,
+            "winning_number_int": winning_number,
+            "winning_color": winning_color,
+            "winning_option_id": winning_option_id,
+        }
 
     async def _run_acceleration_phase(self, broadcast: Callable[[dict], Any]) -> None:
         """Phase 1: Wheel and ball accelerate."""
