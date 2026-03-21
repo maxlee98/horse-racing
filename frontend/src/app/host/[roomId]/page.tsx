@@ -316,7 +316,7 @@ export default function HostPage() {
                 <div className="animate-in fade-in zoom-in duration-500">
                   <h2 className="text-3xl font-black mb-6">🎰 Winning Number 🎰</h2>
                   <div 
-                    className="w-40 h-40 mx-auto rounded-full flex flex-col items-center justify-center text-white mb-6 shadow-2xl"
+                    className="w-44 h-44 mx-auto rounded-full flex flex-col items-center justify-center text-white mb-4 shadow-2xl"
                     style={{ 
                       background: rouletteState.winning_color === 'red' 
                         ? '#DC2626' 
@@ -326,9 +326,44 @@ export default function HostPage() {
                       boxShadow: `0 0 80px ${rouletteState.winning_color === 'red' ? 'rgba(220, 38, 38, 0.6)' : rouletteState.winning_color === 'black' ? 'rgba(31, 41, 55, 0.6)' : 'rgba(5, 150, 105, 0.6)'}`
                     }}
                   >
-                    <span className="text-6xl font-black">{rouletteState.winning_number}</span>
-                    <span className="text-lg font-semibold uppercase tracking-wider mt-1">{rouletteState.winning_color}</span>
+                    <span className="text-7xl font-black">{rouletteState.winning_number}</span>
+                    <span className="text-xl font-semibold uppercase tracking-wider mt-1">{rouletteState.winning_color}</span>
                   </div>
+                  
+                  {/* Summary of winning number properties */}
+                  {(() => {
+                    const num = rouletteState.winning_number === '00' ? 37 : parseInt(rouletteState.winning_number || '0');
+                    const dozen = num === 0 || num === 37 ? null : num <= 12 ? '1st 12' : num <= 24 ? '2nd 12' : '3rd 12';
+                    const column = num === 0 || num === 37 ? null : num % 3 === 1 ? 'Column 1' : num % 3 === 2 ? 'Column 2' : 'Column 3';
+                    const parity = num === 0 || num === 37 ? null : num % 2 === 0 ? 'Even' : 'Odd';
+                    const range = num === 0 || num === 37 ? null : num <= 18 ? '1-18' : '19-36';
+                    
+                    return (
+                      <div className="flex flex-wrap justify-center gap-2 mb-4">
+                        {dozen && (
+                          <span className="px-3 py-1 rounded-full text-sm font-medium bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
+                            {dozen}
+                          </span>
+                        )}
+                        {column && (
+                          <span className="px-3 py-1 rounded-full text-sm font-medium bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                            {column}
+                          </span>
+                        )}
+                        {parity && (
+                          <span className="px-3 py-1 rounded-full text-sm font-medium bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                            {parity}
+                          </span>
+                        )}
+                        {range && (
+                          <span className="px-3 py-1 rounded-full text-sm font-medium bg-orange-500/20 text-orange-400 border border-orange-500/30">
+                            {range}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  
                   {rouletteState.total_payout !== undefined && rouletteState.total_payout > 0 && (
                     <div className="card p-4 inline-block mb-6" style={{ borderColor: 'var(--green)' }}>
                       <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Total Payout</p>
@@ -420,7 +455,7 @@ export default function HostPage() {
                 <ControlBtn onClick={() => hostAction('open_bets')} disabled={room?.status === 'open'} color="var(--green)">🎯 Open Betting</ControlBtn>
                 <ControlBtn onClick={() => hostAction('lock_bets')} disabled={room?.status !== 'open'} color="var(--amber)">🔒 Lock Bets</ControlBtn>
                 {room?.status === 'ended' && (
-                  <ControlBtn onClick={() => hostAction('next_round')} color="var(--accent-glow)">➡️ Next Round (Randomize Probs)</ControlBtn>
+                  <ControlBtn onClick={() => hostAction('next_round')} color="var(--accent-glow)">➡️ Next Round</ControlBtn>
                 )}
                 <ControlBtn onClick={() => hostAction('reset_lobby')} color="var(--red)">🔄 Reset Lobby</ControlBtn>
               </div>
@@ -471,7 +506,7 @@ export default function HostPage() {
             </div>
             )}
 
-            {room && room.status === 'locked' && room.game_mode !== 'horse_racing' && (
+            {room && room.status === 'locked' && room.game_mode !== 'horse_racing' && room.game_mode !== 'roulette' && (
               <div className="card p-5">
                 <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>Declare Winner</p>
                 <div className="space-y-2">

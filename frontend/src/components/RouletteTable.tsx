@@ -21,7 +21,9 @@ export default function RouletteTable({
 
   const handleNumberClick = (num: number) => {
     if (disabled) return;
-    const option = betOptions.find(o => o.label === String(num) || o.id === String(num));
+    // For 00, we use 37 internally but display as '00'
+    const displayNum = num === 37 ? '00' : String(num);
+    const option = betOptions.find(o => o.label === displayNum || o.id === displayNum || o.id === String(num));
     if (option) {
       onSelectOption(option.id, 'single', num);
     }
@@ -29,7 +31,29 @@ export default function RouletteTable({
 
   const handleBetTypeClick = (betType: RouletteBetType) => {
     if (disabled) return;
-    const option = betOptions.find(o => o.label.toLowerCase().replace(/\s+/g, '_') === betType);
+    
+    // Map bet types to option labels
+    const betTypeToLabel: Record<string, string[]> = {
+      'red': ['red'],
+      'black': ['black'],
+      'even': ['even'],
+      'odd': ['odd'],
+      'low': ['1-18', 'low'],
+      'high': ['19-36', 'high'],
+      'first_dozen': ['1st 12', 'first 12'],
+      'second_dozen': ['2nd 12', 'second 12'],
+      'third_dozen': ['3rd 12', 'third 12'],
+      'first_column': ['column 1', 'col1'],
+      'second_column': ['column 2', 'col2'],
+      'third_column': ['column 3', 'col3'],
+    };
+    
+    const searchLabels = betTypeToLabel[betType] || [betType];
+    const option = betOptions.find(o => {
+      const optLabel = o.label.toLowerCase();
+      return searchLabels.some(label => optLabel.includes(label.toLowerCase()));
+    });
+    
     if (option) {
       onSelectOption(option.id, betType);
     }

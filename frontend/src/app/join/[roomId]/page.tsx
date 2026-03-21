@@ -44,6 +44,14 @@ export default function JoinPage() {
   });
   const [selectedBetType, setSelectedBetType] = useState<RouletteBetType | null>(null);
   const [selectedNumber, setSelectedNumber] = useState<number | undefined>(undefined);
+  const [gameResults, setGameResults] = useState<{
+    winningNumber: string;
+    winningColor: string;
+    myBets: Array<{ label: string; amount: number; won: boolean; payout: number }>;
+    totalBet: number;
+    totalWon: number;
+    netResult: number;
+  } | null>(null);
   const notifTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const notify = (msg: string) => {
@@ -72,6 +80,14 @@ export default function JoinPage() {
       if (s.status === 'open') notify('🎯 Bets are now open!');
       if (s.status === 'locked') notify('🔒 Bets are locked!');
       if (s.status === 'ended') notify('🏁 Game ended!');
+    }
+    if (msg.type === 'game_ended') {
+      const data = msg.data as { winner_option_id: string; winning_bets: Array<{ player_id: string; payout: number; option_label?: string }> };
+      const myWinningBets = data.winning_bets.filter(wb => wb.player_id === playerId);
+      if (myWinningBets.length > 0) {
+        const totalPayout = myWinningBets.reduce((sum, wb) => sum + wb.payout, 0);
+        notify(`🏆 You won $${totalPayout.toFixed(2)}!`);
+      }
     }
     if (msg.type === 'error') {
       notify(`❌ ${(msg.data as { message: string }).message}`);
@@ -147,7 +163,16 @@ export default function JoinPage() {
         winning_number: string;
         winning_number_int: number;
         winning_color: string;
+        winning_bets?: Array<{ player_id: string; option_id: string; option_label: string; amount: number; payout: number }>;
+        room_state?: RoomState;
       };
+      
+      // Update room state so the results module renders with status='ended'
+      if (data.room_state) {
+        setRoom(data.room_state);
+        setMyBets(data.room_state.bets.filter(b => b.player_id === playerId));
+      }
+      
       setRouletteState(prev => ({
         ...prev,
         is_spinning: false,
@@ -157,8 +182,34 @@ export default function JoinPage() {
         progress: 1,
       }));
       notify(`🎰 ${data.winning_number} ${data.winning_color} wins!`);
+      
+      // Calculate game results for display
+      const myWinningBets = data.winning_bets?.filter(wb => wb.player_id === playerId) || [];
+      
+      setGameResults(prev => {
+        const currentMyBets = myBets;
+        const totalBet = currentMyBets.reduce((sum, b) => sum + b.amount, 0);
+        const totalWon = myWinningBets.reduce((sum, wb) => sum + wb.payout, 0);
+        
+        return {
+          winningNumber: data.winning_number,
+          winningColor: data.winning_color,
+          myBets: currentMyBets.map(bet => {
+            const winningBet = myWinningBets.find(wb => wb.option_id === bet.option_id);
+            return {
+              label: bet.option_label,
+              amount: bet.amount,
+              won: !!winningBet,
+              payout: winningBet?.payout || 0,
+            };
+          }),
+          totalBet,
+          totalWon,
+          netResult: totalWon - totalBet,
+        };
+      });
     }
-  }, [playerId]);
+  }, [playerId, myBets]);
 
   const { connected, send } = useWebSocket({ roomId, clientId: playerId, onMessage: handleMessage });
 
@@ -172,7 +223,12 @@ export default function JoinPage() {
     if (!selectedOption) { notify('Select an option first'); return; }
     const amt = parseFloat(betAmount);
     if (isNaN(amt) || amt <= 0) { notify('Enter a valid amount'); return; }
-    send('place_bet', { option_id: selectedOption, amount: amt });
+    send('place_bet', { 
+      option_id: selectedOption, 
+      amount: amt,
+      bet_type: selectedBetType,
+      bet_number: selectedNumber
+    });
   };
 
   const me = room?.players[playerId];
@@ -293,6 +349,7 @@ export default function JoinPage() {
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-black truncate">{room?.title || '...'}</h1>
               {room?.game_mode === 'horse_racing' && <span>🏇</span>}
+              {room?.game_mode === 'roulette' && <span>🎰</span>}
             </div>
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
               {room ? `${room.player_count} players connected` : 'Loading...'}
@@ -308,7 +365,7 @@ export default function JoinPage() {
         </div>
 
         {/* Result banner */}
-        {room?.status === 'ended' && winnerOption && (
+        {room?.status === 'ended' && winnerOption && room?.game_mode !== 'roulette' && (
           <div className="card p-4 mb-4 text-center" style={{ borderColor: myWinnerBet ? 'var(--green)' : 'var(--red)', background: myWinnerBet ? 'var(--green-soft)' : 'var(--red-soft)' }}>
             <p className="text-2xl mb-1">{myWinnerBet ? '🏆' : '💸'}</p>
             <p className="font-black text-lg">{winnerOption.label} won!</p>
@@ -319,20 +376,77 @@ export default function JoinPage() {
           </div>
         )}
 
-        {/* Bet Options */}
+        {/* Roulette Results Module */}
+        {room?.status === 'ended' && room?.game_mode === 'roulette' && gameResults && (
+          <div className="card p-4 mb-4" style={{ borderColor: gameResults.netResult >= 0 ? 'var(--green)' : 'var(--red)', background: gameResults.netResult >= 0 ? 'var(--green-soft)' : 'var(--red-soft)' }}>
+            <div className="text-center mb-4">
+              <p className="text-3xl mb-2">🎰</p>
+              <p className="font-black text-lg">{gameResults.winningNumber} <span style={{ 
+                color: gameResults.winningColor === 'red' ? '#DC2626' : gameResults.winningColor === 'black' ? '#1F2937' : '#059669',
+                textTransform: 'uppercase'
+              }}>{gameResults.winningColor}</span></p>
+            </div>
+            
+            <p className="text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--text-muted)' }}>Your Bets</p>
+            <div className="space-y-2 mb-4">
+              {gameResults.myBets.map((bet, i) => (
+                <div key={i} className="flex items-center justify-between text-sm p-2 rounded" style={{ background: 'rgba(255,255,255,0.1)' }}>
+                  <div className="flex items-center gap-2">
+                    <span>{bet.won ? '✅' : '❌'}</span>
+                    <span>{bet.label}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-mono">${bet.amount}</span>
+                    {bet.won && (
+                      <span className="ml-2 font-mono font-bold" style={{ color: 'var(--green)' }}>+${bet.payout.toFixed(2)}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <div className="border-t pt-3" style={{ borderColor: 'var(--border)' }}>
+              <div className="flex items-center justify-between text-sm mb-1">
+                <span style={{ color: 'var(--text-muted)' }}>Total Bet:</span>
+                <span className="font-mono">${gameResults.totalBet.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm mb-1">
+                <span style={{ color: 'var(--text-muted)' }}>Total Won:</span>
+                <span className="font-mono" style={{ color: 'var(--green)' }}>${gameResults.totalWon.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between text-lg font-bold mt-2 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+                <span>Net Result:</span>
+                <span style={{ color: gameResults.netResult >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {gameResults.netResult >= 0 ? '+' : ''}${gameResults.netResult.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Bet Options - Roulette */}
         {room?.status !== 'ended' && room?.game_mode === 'roulette' && (
           <div className="mb-5">
-            <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>Choose Your Bet</p>
-            <RouletteTable
-              selectedOption={selectedOption}
-              onSelectOption={(optionId, betType, betNumber) => {
-                setSelectedOption(optionId);
-                setSelectedBetType(betType);
-                setSelectedNumber(betNumber);
-              }}
-              disabled={room.status !== 'open'}
-              betOptions={room.bet_options}
-            />
+            <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>
+              {room?.status === 'waiting' ? 'Waiting for host to open betting...' : 'Choose Your Bet'}
+            </p>
+            {room?.status === 'waiting' ? (
+              <div className="text-center py-8" style={{ color: 'var(--text-muted)' }}>
+                <div className="text-4xl mb-2">⏳</div>
+                <p>Please wait for the host to open betting</p>
+              </div>
+            ) : (
+              <RouletteTable
+                selectedOption={selectedOption}
+                onSelectOption={(optionId, betType, betNumber) => {
+                  setSelectedOption(optionId);
+                  setSelectedBetType(betType);
+                  setSelectedNumber(betNumber);
+                }}
+                disabled={room.status !== 'open'}
+                betOptions={room.bet_options}
+              />
+            )}
           </div>
         )}
 
@@ -407,7 +521,7 @@ export default function JoinPage() {
         )}
 
         {/* Status messages */}
-        {room?.status === 'waiting' && (
+        {room?.status === 'waiting' && room?.game_mode !== 'roulette' && (
           <div className="text-center py-8" style={{ color: 'var(--text-muted)' }}>
             <div className="text-4xl mb-2">⏳</div>
             <p>Waiting for host to open bets...</p>
@@ -429,7 +543,7 @@ export default function JoinPage() {
         )}
 
         {/* My Bets */}
-        {myBets.length > 0 && (
+        {myBets.length > 0 && room?.status !== 'ended' && (
           <div className="card p-4">
             <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>My Bets</p>
             <div className="space-y-2">

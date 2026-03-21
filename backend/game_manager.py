@@ -53,8 +53,32 @@ class GameManager:
         room_id = str(uuid.uuid4())[:8].upper()
         options = [BetOption(**opt) for opt in bet_options] if bet_options else []
         
-        # Calculate probabilities based on inverse of odds (lower odds = higher probability)
-        if options:
+        if game_mode == GameMode.ROULETTE:
+            # For roulette, all numbers have equal probability (1/38)
+            # Other bet types (red/black/dozens etc.) derive their probability from this
+            for opt in options:
+                if opt.label.isdigit() or opt.label == '00':
+                    # Single numbers: 1/38 chance
+                    opt.probability = round(1.0 / 38, 4)
+                elif opt.label.lower() in ['red', 'black']:
+                    # 18/38 chance
+                    opt.probability = round(18.0 / 38, 4)
+                elif opt.label.lower() in ['even', 'odd']:
+                    # 18/38 chance (excluding 0 and 00)
+                    opt.probability = round(18.0 / 38, 4)
+                elif opt.label in ['1-18 (Low)', '19-36 (High)']:
+                    # 18/38 chance
+                    opt.probability = round(18.0 / 38, 4)
+                elif '12' in opt.label:
+                    # Dozens: 12/38 chance
+                    opt.probability = round(12.0 / 38, 4)
+                elif 'Column' in opt.label:
+                    # Columns: 12/38 chance
+                    opt.probability = round(12.0 / 38, 4)
+                else:
+                    opt.probability = round(1.0 / 38, 4)
+        elif options:
+            # Calculate probabilities based on inverse of odds (lower odds = higher probability)
             # Inverse odds: 1/odds gives weight, normalize to get probability
             inverse_odds = [1.0 / opt.odds for opt in options]
             total_inverse = sum(inverse_odds)

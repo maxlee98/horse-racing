@@ -1,19 +1,39 @@
+"""Live Betting Game API - Refactored to use service layer."""
+
 import uuid
-import json
-import asyncio
-import qrcode
 import io
 import base64
+import asyncio
+from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
 
-from game_manager import GameManager
-from models import GameStatus, WSMessageType, GameMode
+# New modular imports
+from core.models import GameStatus, WSMessageType, GameMode
+from core.constants import GameConstants
+from core.exceptions import (
+    GameException,
+    RoomNotFoundException,
+    NotAuthorizedException,
+    InvalidBetException,
+    RoomFullException,
+)
+from repositories import InMemoryRoomRepository
+from services import RoomService, BettingService, PlayerService
+from infrastructure import WebSocketManager
+from game_modes import get_game_mode
 
-app = FastAPI(title="Live Betting Game API")
+# FastAPI app with Swagger docs
+app = FastAPI(
+    title="Live Betting Game API",
+    description="Real-time betting game with multiple game modes",
+    version="2.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
 
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
@@ -22,36 +42,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-game_manager = GameManager()
+# Initialize infrastructure
+repository = InMemoryRoomRepository()
+ws_manager = WebSocketManager()
 
-# room_id -> { player_id/host_id -> WebSocket }
-connections: dict[str, dict[str, WebSocket]] = {}
-
-
-# ─── Helpers ─────────────────────────────────────────────────────────────────
-
-async def broadcast(room_id: str, message: dict, exclude: Optional[str] = None):
-    if room_id not in connections:
-        return
-    dead = []
-    for cid, ws in connections[room_id].items():
-        if cid == exclude:
-            continue
-        try:
-            await ws.send_json(message)
-        except Exception:
-            dead.append(cid)
-    for cid in dead:
-        connections[room_id].pop(cid, None)
+# Initialize services with dependency injection
+room_service = RoomService(repository)
+betting_service = BettingService(room_service)
+player_service = PlayerService(room_service)
 
 
-async def send_room_state(room_id: str, target_ws: WebSocket):
-    state = game_manager.get_room_state(room_id)
-    if state:
-        await target_ws.send_json({"type": WSMessageType.ROOM_STATE, "data": state})
-
-
-# ─── REST Endpoints ───────────────────────────────────────────────────────────
+# ─── Pydantic Request Models ─────────────────────────────────────────────────
 
 class CreateRoomRequest(BaseModel):
     title: str = "Live Betting Game"
@@ -61,61 +62,72 @@ class CreateRoomRequest(BaseModel):
     use_randomized_probabilities: bool = False
 
 
-@app.post("/api/rooms")
-async def create_room(req: CreateRoomRequest):
-    host_id = str(uuid.uuid4())
-    
-    # Map string game_mode to enum
-    if req.game_mode == "horse_racing":
-        game_mode = GameMode.HORSE_RACING
-    elif req.game_mode == "roulette":
-        game_mode = GameMode.ROULETTE
-    else:
-        game_mode = GameMode.STANDARD
-    
-    room = game_manager.create_room(
-        host_id=host_id,
-        title=req.title,
-        description=req.description,
-        bet_options=req.bet_options,
-        game_mode=game_mode,
-        use_randomized_probabilities=req.use_randomized_probabilities,
-    )
-    return {
-        "room_id": room.room_id,
-        "host_id": host_id,
-        "status": room.status,
-        "game_mode": room.game_mode.value,
-    }
-
-
 class UpdateProbabilitiesRequest(BaseModel):
     probabilities: dict[str, float]
     host_id: str
 
 
-@app.post("/api/rooms/{room_id}/probabilities")
-async def update_probabilities(room_id: str, req: UpdateProbabilitiesRequest):
-    success, message = game_manager.update_probabilities(room_id, req.probabilities, req.host_id)
-    if not success:
-        raise HTTPException(status_code=403, detail=message)
-    return {"success": True, "message": message}
+class PlaceBetRequest(BaseModel):
+    option_id: str
+    amount: float
+    bet_type: Optional[str] = None
+    bet_number: Optional[int] = None
+
+
+# ─── REST Endpoints ───────────────────────────────────────────────────────────
+
+@app.post("/api/rooms", response_model=dict)
+async def create_room(req: CreateRoomRequest):
+    """Create a new game room."""
+    host_id = str(uuid.uuid4())
+    
+    # Map string game_mode to enum
+    game_mode_map = {
+        "horse_racing": GameMode.HORSE_RACING,
+        "roulette": GameMode.ROULETTE,
+        "standard": GameMode.STANDARD,
+    }
+    game_mode = game_mode_map.get(req.game_mode, GameMode.STANDARD)
+    
+    try:
+        room = room_service.create_room(
+            host_id=host_id,
+            title=req.title,
+            description=req.description,
+            bet_options=req.bet_options,
+            game_mode=game_mode,
+            use_randomized_probabilities=req.use_randomized_probabilities,
+        )
+        return {
+            "room_id": room.room_id,
+            "host_id": host_id,
+            "status": room.status.value,
+            "game_mode": room.game_mode.value,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/rooms/{room_id}")
 async def get_room(room_id: str):
-    state = game_manager.get_room_state(room_id)
-    if not state:
+    """Get room state by ID."""
+    try:
+        room = room_service.get_room_or_raise(room_id)
+        return room_service.to_dict(room)
+    except RoomNotFoundException:
         raise HTTPException(status_code=404, detail="Room not found")
-    return state
 
 
 @app.get("/api/rooms/{room_id}/qr")
 async def get_qr(room_id: str, base_url: str = "http://localhost:3000"):
-    room = game_manager.get_room(room_id)
-    if not room:
+    """Generate QR code for joining a room."""
+    try:
+        room = room_service.get_room_or_raise(room_id)
+    except RoomNotFoundException:
         raise HTTPException(status_code=404, detail="Room not found")
 
+    import qrcode
+    
     join_url = f"{base_url}/join/{room_id}"
     qr = qrcode.QRCode(version=1, box_size=10, border=4)
     qr.add_data(join_url)
@@ -129,176 +141,334 @@ async def get_qr(room_id: str, base_url: str = "http://localhost:3000"):
     return {"qr_base64": f"data:image/png;base64,{b64}", "join_url": join_url}
 
 
-# ─── WebSocket ────────────────────────────────────────────────────────────────
+@app.post("/api/rooms/{room_id}/probabilities")
+async def update_probabilities(room_id: str, req: UpdateProbabilitiesRequest):
+    """Update win probabilities for bet options."""
+    try:
+        room = room_service.update_probabilities(
+            room_id, req.probabilities, req.host_id
+        )
+        return {"success": True, "room": room_service.to_dict(room)}
+    except RoomNotFoundException:
+        raise HTTPException(status_code=404, detail="Room not found")
+    except NotAuthorizedException as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+
+# ─── WebSocket Endpoint ───────────────────────────────────────────────────────
 
 @app.websocket("/ws/{room_id}/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str):
+    """WebSocket endpoint for real-time game communication."""
     await websocket.accept()
-
+    
     room_id = room_id.upper()
-    if room_id not in connections:
-        connections[room_id] = {}
-    connections[room_id][client_id] = websocket
+    ws_manager.connect(room_id, client_id, websocket)
+    
+    async def broadcast_room_state(exclude: Optional[str] = None):
+        """Broadcast current room state to all clients."""
+        room = room_service.get_room(room_id)
+        if room:
+            await ws_manager.broadcast(
+                room_id,
+                {"type": WSMessageType.ROOM_STATE, "data": room_service.to_dict(room)},
+                exclude=exclude
+            )
 
     try:
         while True:
+            import json
             raw = await websocket.receive_text()
             msg = json.loads(raw)
             msg_type = msg.get("type")
             data = msg.get("data", {})
 
-            # ── Player joins ──────────────────────────────────────────────────
+            # ── Player joins ─────────────────────────────────────────────
             if msg_type == WSMessageType.JOIN:
                 name = data.get("name", "Anonymous")
-                player = game_manager.add_player(room_id, client_id, name)
-                if not player:
+                
+                try:
+                    player = player_service.add_player(room_id, client_id, name)
+                except RoomNotFoundException:
                     await websocket.send_json({
                         "type": WSMessageType.ERROR,
-                        "data": {"message": "Room is full or not found"}
+                        "data": {"message": "Room not found"}
+                    })
+                    continue
+                except RoomFullException:
+                    await websocket.send_json({
+                        "type": WSMessageType.ERROR,
+                        "data": {"message": "Room is full"}
                     })
                     continue
 
                 # Send full state to the new player
-                await send_room_state(room_id, websocket)
-
+                await broadcast_room_state(exclude=client_id)
+                
                 # Notify others
-                await broadcast(room_id, {
-                    "type": WSMessageType.PLAYER_JOINED,
-                    "data": {"player": player.model_dump(), "room_state": game_manager.get_room_state(room_id)}
-                }, exclude=client_id)
+                await ws_manager.broadcast(
+                    room_id,
+                    {
+                        "type": WSMessageType.PLAYER_JOINED,
+                        "data": {"player": player.model_dump()}
+                    },
+                    exclude=client_id
+                )
 
-            # ── Place a bet ───────────────────────────────────────────────────
+            # ── Place a bet ───────────────────────────────────────────────
             elif msg_type == WSMessageType.PLACE_BET:
                 option_id = data.get("option_id")
                 amount = float(data.get("amount", 0))
-                success, message, bet = game_manager.place_bet(room_id, client_id, option_id, amount)
-
-                if not success:
+                bet_type = data.get("bet_type")
+                bet_number = data.get("bet_number")
+                
+                try:
+                    bet = betting_service.place_bet(
+                        room_id, client_id, option_id, amount, bet_type, bet_number
+                    )
+                    
+                    await ws_manager.broadcast(room_id, {
+                        "type": WSMessageType.BET_PLACED,
+                        "data": {"bet": bet.model_dump()}
+                    })
+                    await broadcast_room_state()
+                    
+                except (InvalidBetException, RoomNotFoundException) as e:
                     await websocket.send_json({
                         "type": WSMessageType.ERROR,
-                        "data": {"message": message}
+                        "data": {"message": str(e)}
+                    })
+
+            # ── Host actions ───────────────────────────────────────────────
+            elif msg_type == WSMessageType.HOST_ACTION:
+                action = data.get("action")
+                
+                try:
+                    room = room_service.get_room_or_raise(room_id)
+                except RoomNotFoundException:
+                    await websocket.send_json({
+                        "type": WSMessageType.ERROR,
+                        "data": {"message": "Room not found"}
                     })
                     continue
 
-                state = game_manager.get_room_state(room_id)
-                await broadcast(room_id, {
-                    "type": WSMessageType.BET_PLACED,
-                    "data": {"bet": bet.model_dump(), "room_state": state}
-                })
-
-            # ── Host actions ──────────────────────────────────────────────────
-            elif msg_type == WSMessageType.HOST_ACTION:
-                action = data.get("action")
-                room = game_manager.get_room(room_id)
-
-                if not room or room.host_id != client_id:
+                if room.host_id != client_id:
                     await websocket.send_json({
                         "type": WSMessageType.ERROR,
                         "data": {"message": "Not authorized as host"}
                     })
                     continue
 
-                if action == "open_bets":
-                    game_manager.update_game_status(room_id, GameStatus.OPEN, client_id)
-                elif action == "lock_bets":
-                    # For animated game modes, start the animation instead of just locking
-                    if room.game_mode == GameMode.HORSE_RACING:
-                        game_manager.update_game_status(room_id, GameStatus.LOCKED, client_id)
-                        state = game_manager.get_room_state(room_id)
-                        await broadcast(room_id, {
-                            "type": WSMessageType.GAME_UPDATED,
-                            "data": {"room_state": state}
-                        })
-                        # Start horse race asynchronously
-                        asyncio.create_task(
-                            game_manager.run_horse_race(room_id, client_id, 
-                                lambda msg: broadcast(room_id, msg))
-                        )
-                        continue  # Skip the normal broadcast below
-                    elif room.game_mode == GameMode.ROULETTE:
-                        game_manager.update_game_status(room_id, GameStatus.LOCKED, client_id)
-                        state = game_manager.get_room_state(room_id)
-                        await broadcast(room_id, {
-                            "type": WSMessageType.GAME_UPDATED,
-                            "data": {"room_state": state}
-                        })
-                        # Start roulette spin asynchronously
-                        asyncio.create_task(
-                            game_manager.run_roulette_spin(room_id, client_id,
-                                lambda msg: broadcast(room_id, msg))
-                        )
-                        continue  # Skip the normal broadcast below
-                    else:
-                        game_manager.update_game_status(room_id, GameStatus.LOCKED, client_id)
-                elif action == "set_winner":
-                    option_id = data.get("option_id")
-                    success, msg_text = game_manager.set_winner(room_id, option_id, client_id)
-                    if not success:
-                        await websocket.send_json({
-                            "type": WSMessageType.ERROR,
-                            "data": {"message": msg_text}
-                        })
-                        continue
-                elif action == "update_options":
-                    options = data.get("bet_options", [])
-                    game_manager.update_bet_options(room_id, options, client_id)
-                elif action == "update_probabilities":
-                    probabilities = data.get("probabilities", {})
-                    success, msg_text = game_manager.update_probabilities(room_id, probabilities, client_id)
-                    if not success:
-                        await websocket.send_json({
-                            "type": WSMessageType.ERROR,
-                            "data": {"message": msg_text}
-                        })
-                        continue
-                elif action == "randomize_probabilities":
-                    success, msg_text = game_manager.randomize_probabilities(room_id, client_id)
-                    if not success:
-                        await websocket.send_json({
-                            "type": WSMessageType.ERROR,
-                            "data": {"message": msg_text}
-                        })
-                        continue
-                elif action == "next_round":
-                    success, msg_text = game_manager.next_round(room_id, client_id)
-                    if not success:
-                        await websocket.send_json({
-                            "type": WSMessageType.ERROR,
-                            "data": {"message": msg_text}
-                        })
-                        continue
-                elif action == "reset_lobby":
-                    success, msg_text = game_manager.reset_lobby(room_id, client_id)
-                    if not success:
-                        await websocket.send_json({
-                            "type": WSMessageType.ERROR,
-                            "data": {"message": msg_text}
-                        })
-                        continue
-                elif action == "select_winner_by_probability":
-                    success, msg_text, winner_id = game_manager.select_winner_by_probability(room_id, client_id)
-                    if not success:
-                        await websocket.send_json({
-                            "type": WSMessageType.ERROR,
-                            "data": {"message": msg_text}
-                        })
-                        continue
-
-                state = game_manager.get_room_state(room_id)
-                await broadcast(room_id, {
-                    "type": WSMessageType.GAME_UPDATED,
-                    "data": {"room_state": state}
-                })
+                # Handle host actions
+                await _handle_host_action(
+                    room_id, client_id, action, data, websocket, broadcast_room_state
+                )
 
     except WebSocketDisconnect:
-        connections[room_id].pop(client_id, None)
-        game_manager.remove_player(room_id, client_id)
-        state = game_manager.get_room_state(room_id)
-        if state:
-            await broadcast(room_id, {
-                "type": WSMessageType.PLAYER_LEFT,
-                "data": {"player_id": client_id, "room_state": state}
-            })
+        ws_manager.disconnect(room_id, client_id)
+        player_service.remove_player(room_id, client_id)
+        await ws_manager.broadcast(room_id, {
+            "type": WSMessageType.PLAYER_LEFT,
+            "data": {"player_id": client_id}
+        })
+        await broadcast_room_state()
     except Exception as e:
-        connections[room_id].pop(client_id, None)
+        ws_manager.disconnect(room_id, client_id)
         print(f"WebSocket error for {client_id}: {e}")
+
+
+async def _handle_host_action(
+    room_id: str,
+    host_id: str,
+    action: str,
+    data: dict,
+    websocket: WebSocket,
+    broadcast_room_state
+):
+    """Handle host actions with appropriate responses."""
+    
+    if action == "open_bets":
+        room_service.update_status(room_id, GameStatus.OPEN, host_id)
+        await ws_manager.broadcast(room_id, {
+            "type": WSMessageType.GAME_UPDATED,
+            "data": {"message": "Bets are now open!"}
+        })
+        await broadcast_room_state()
+    
+    elif action == "lock_bets":
+        room = room_service.get_room_or_raise(room_id)
+        game_mode_strategy = get_game_mode(room.game_mode.value)
+        
+        # Lock bets first
+        room_service.update_status(room_id, GameStatus.LOCKED, host_id)
+        await broadcast_room_state()
+        
+        # Run animation for animated game modes
+        if room.game_mode in [GameMode.HORSE_RACING, GameMode.ROULETTE]:
+            async def broadcast_with_state(msg: dict):
+                await ws_manager.broadcast(room_id, msg)
+            
+            async def run_animation_and_payout():
+                """Run animation and process payouts afterwards."""
+                # Run the animation
+                success, message, winning_value = await game_mode_strategy.run_animation(
+                    room, broadcast_with_state
+                )
+                
+                if success and winning_value is not None:
+                    # Process payouts based on the winning value
+                    winning_bets = betting_service.process_payouts(room, winning_value)
+                    
+                    # Broadcast game ended with winning bets
+                    await ws_manager.broadcast(room_id, {
+                        "type": WSMessageType.GAME_ENDED,
+                        "data": {
+                            "winner_option_id": room.winner_option_id,
+                            "winning_value": winning_value,
+                            "winning_bets": winning_bets,
+                            "message": message
+                        }
+                    })
+                    await broadcast_room_state()
+            
+            # Run animation asynchronously
+            asyncio.create_task(run_animation_and_payout())
+        else:
+            await ws_manager.broadcast(room_id, {
+                "type": WSMessageType.GAME_UPDATED,
+                "data": {"message": "Bets locked. Waiting for winner."}
+            })
+    
+    elif action == "set_winner":
+        option_id = data.get("option_id")
+        if not option_id:
+            await websocket.send_json({
+                "type": WSMessageType.ERROR,
+                "data": {"message": "Missing option_id"}
+            })
+            return
+        room = room_service.set_winner(room_id, option_id, host_id)
+        
+        # Process payouts
+        winning_bets = betting_service.process_payouts(room, option_id)
+        
+        await ws_manager.broadcast(room_id, {
+            "type": WSMessageType.GAME_ENDED,
+            "data": {
+                "winner_option_id": option_id,
+                "winning_bets": winning_bets
+            }
+        })
+        await broadcast_room_state()
+    
+    elif action == "update_probabilities":
+        probabilities = data.get("probabilities", {})
+        try:
+            room_service.update_probabilities(room_id, probabilities, host_id)
+            await broadcast_room_state()
+        except NotAuthorizedException as e:
+            await websocket.send_json({
+                "type": WSMessageType.ERROR,
+                "data": {"message": str(e)}
+            })
+    
+    elif action == "randomize_probabilities":
+        try:
+            room_service.randomize_probabilities(room_id, host_id)
+            await broadcast_room_state()
+        except NotAuthorizedException as e:
+            await websocket.send_json({
+                "type": WSMessageType.ERROR,
+                "data": {"message": str(e)}
+            })
+    
+    elif action == "next_round":
+        try:
+            room_service.next_round(room_id, host_id)
+            await ws_manager.broadcast(room_id, {
+                "type": WSMessageType.GAME_UPDATED,
+                "data": {"message": "New round started!"}
+            })
+            await broadcast_room_state()
+        except NotAuthorizedException as e:
+            await websocket.send_json({
+                "type": WSMessageType.ERROR,
+                "data": {"message": str(e)}
+            })
+    
+    elif action == "reset_lobby":
+        try:
+            room_service.reset_lobby(room_id, host_id)
+            await ws_manager.broadcast(room_id, {
+                "type": WSMessageType.GAME_UPDATED,
+                "data": {"message": "Lobby reset!"}
+            })
+            await broadcast_room_state()
+        except NotAuthorizedException as e:
+            await websocket.send_json({
+                "type": WSMessageType.ERROR,
+                "data": {"message": str(e)}
+            })
+    
+    elif action == "select_winner_by_probability":
+        room = room_service.get_room_or_raise(room_id)
+        game_mode_strategy = get_game_mode(room.game_mode.value)
+        
+        # Use the strategy to select winner
+        winner_id = game_mode_strategy.select_winner_by_probability(room)
+        
+        if not winner_id:
+            await websocket.send_json({
+                "type": WSMessageType.ERROR,
+                "data": {"message": "Could not determine winner"}
+            })
+            return
+        
+        room = room_service.set_winner(room_id, winner_id, host_id)
+        winning_bets = betting_service.process_payouts(room, winner_id)
+        
+        await ws_manager.broadcast(room_id, {
+            "type": WSMessageType.GAME_ENDED,
+            "data": {
+                "winner_option_id": winner_id,
+                "winning_bets": winning_bets
+            }
+        })
+        await broadcast_room_state()
+
+    elif action == "reveal_results":
+        # Host clicked Close on roulette outcome screen - reveal results to players
+        room = room_service.get_room_or_raise(room_id)
+        await ws_manager.broadcast(room_id, {
+            "type": WSMessageType.ROULETTE_REVEALED,
+            "data": {
+                "message": "Results revealed!",
+                "room_state": room_service.to_dict(room)
+            }
+        })
+
+
+# ─── Health Check ────────────────────────────────────────────────────────────
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "version": "2.0.0",
+        "active_rooms": len(repository.list_all()),
+        "active_connections": sum(
+            ws_manager.get_connection_count(rid) 
+            for rid in ws_manager.get_room_ids()
+        ),
+    }
+
+
+@app.get("/api/constants")
+async def get_constants():
+    """Get shared game constants for frontend synchronization.
+    
+    Returns all constants defined in GameConstants class.
+    Frontend should fetch this on app initialization.
+    """
+    return GameConstants.to_dict()
