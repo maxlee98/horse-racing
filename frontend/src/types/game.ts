@@ -93,6 +93,7 @@ export interface RoomState {
   game_mode: GameMode;
   round_number: number;
   use_randomized_probabilities: boolean;
+  roulette_history?: string[];
 }
 
 export interface RaceState {
@@ -157,6 +158,23 @@ export const ROULETTE_PAYOUTS: Record<RouletteBetType, number> = {
   first_column: 2,
   second_column: 2,
   third_column: 2
+};
+
+// Static odds lookup for roulette bet types (used for potential win display)
+export const ROULETTE_BET_ODDS: Record<string, number> = {
+  // Single numbers (35:1 payout)
+  '0': 36, '00': 36,
+  '1': 36, '2': 36, '3': 36, '4': 36, '5': 36, '6': 36, '7': 36, '8': 36, '9': 36,
+  '10': 36, '11': 36, '12': 36, '13': 36, '14': 36, '15': 36, '16': 36, '17': 36,
+  '18': 36, '19': 36, '20': 36, '21': 36, '22': 36, '23': 36, '24': 36,
+  '25': 36, '26': 36, '27': 36, '28': 36, '29': 36, '30': 36, '31': 36, '32': 36,
+  '33': 36, '34': 36, '35': 36, '36': 36,
+  // Even money bets (1:1 payout)
+  'red': 2, 'black': 2, 'even': 2, 'odd': 2, '1-18': 2, '19-36': 2,
+  // Dozens (2:1 payout)
+  '1st12': 3, '2nd12': 3, '3rd12': 3,
+  // Columns (2:1 payout)
+  'col1': 3, 'col2': 3, 'col3': 3,
 };
 
 export interface WSMessage {

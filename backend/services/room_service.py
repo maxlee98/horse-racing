@@ -243,4 +243,5 @@ class RoomService:
             "game_mode": room.game_mode.value,
             "round_number": room.round_number,
             "use_randomized_probabilities": room.use_randomized_probabilities,
+            "roulette_history": room.roulette_history,
         }

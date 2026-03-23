@@ -328,8 +328,13 @@ async def _handle_host_action(
                     # Process payouts based on the winning number
                     winning_bets = betting_service.process_payouts(room, winning_number)
                     
-                    # For roulette, broadcast roulette_ended with winning_bets
+                    # For roulette, broadcast roulette_ended with winning_bets and update history
                     if room.game_mode == GameMode.ROULETTE:
+                        # Add winning number to history (keep last 10)
+                        room.roulette_history.append(winning_data["winning_number"])
+                        if len(room.roulette_history) > 10:
+                            room.roulette_history = room.roulette_history[-10:]
+                        
                         await ws_manager.broadcast(room_id, {
                             "type": WSMessageType.ROULETTE_ENDED,
                             "data": {

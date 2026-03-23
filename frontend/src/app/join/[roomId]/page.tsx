@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { RoomState, WSMessage, Bet, RaceState, RacePosition, RouletteState, RouletteBetType } from '@/types/game';
+import { RoomState, WSMessage, Bet, RaceState, RacePosition, RouletteState, RouletteBetType, ROULETTE_BET_ODDS } from '@/types/game';
 import RouletteWheel from '@/components/RouletteWheel';
 import RouletteTable from '@/components/RouletteTable';
 
@@ -445,6 +445,7 @@ export default function JoinPage() {
                 }}
                 disabled={room.status !== 'open'}
                 betOptions={room.bet_options}
+                rouletteHistory={room.roulette_history || []}
               />
             )}
           </div>
@@ -513,7 +514,10 @@ export default function JoinPage() {
             {selectedOption && me && (
               <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
                 Potential win: <span className="font-bold" style={{ color: 'var(--green)' }}>
-                  ${(parseFloat(betAmount || '0') * (room.bet_options.find(o => o.id === selectedOption)?.odds || 1)).toFixed(2)}
+                  ${(parseFloat(betAmount || '0') * (room.game_mode === 'roulette' 
+                    ? (ROULETTE_BET_ODDS[selectedOption] || ROULETTE_BET_ODDS[room.bet_options.find(o => o.id === selectedOption)?.label || ''] || 1)
+                    : (room.bet_options.find(o => o.id === selectedOption)?.odds || 1)
+                  )).toFixed(2)}
                 </span>
               </p>
             )}

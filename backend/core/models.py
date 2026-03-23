@@ -1,7 +1,7 @@
 """Core domain models for the betting game."""
 
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from enum import Enum
 
 
@@ -80,6 +80,7 @@ class GameRoom(BaseModel):
     game_mode: GameMode = GameMode.STANDARD
     round_number: int = 1
     use_randomized_probabilities: bool = False  # Whether to use probability-based winner selection
+    roulette_history: List[str] = []  # Last N winning roulette numbers
 
 
 class WSMessageType(str, Enum):

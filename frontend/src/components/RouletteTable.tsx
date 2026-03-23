@@ -1,22 +1,32 @@
 'use client';
 
-import { ROULETTE_COLORS, ROULETTE_PAYOUTS, type RouletteBetType } from '@/types/game';
+import { ROULETTE_COLORS, ROULETTE_PAYOUTS, ROULETTE_BET_ODDS, type RouletteBetType } from '@/types/game';
 
 interface RouletteTableProps {
   selectedOption: string;
   onSelectOption: (optionId: string, betType: RouletteBetType, betNumber?: number) => void;
   disabled: boolean;
   betOptions: Array<{ id: string; label: string; odds: number }>;
+  rouletteHistory?: string[];
 }
 
 export default function RouletteTable({
   selectedOption,
   onSelectOption,
   disabled,
-  betOptions
+  betOptions,
+  rouletteHistory = []
 }: RouletteTableProps) {
   const getNumberColor = (num: number): string => {
     return ROULETTE_COLORS[num] || 'green';
+  };
+
+  const getHistoryColor = (num: string): string => {
+    // Handle '00' as 37
+    const numVal = num === '00' ? 37 : parseInt(num);
+    if (isNaN(numVal)) return 'bg-green-600';
+    return ROULETTE_COLORS[numVal] === 'red' ? 'bg-red-600' : 
+           ROULETTE_COLORS[numVal] === 'black' ? 'bg-gray-900' : 'bg-green-600';
   };
 
   const handleNumberClick = (num: number) => {
@@ -248,6 +258,28 @@ export default function RouletteTable({
           </div>
         </div>
       </div>
+
+      {/* Roulette History */}
+      {rouletteHistory.length > 0 && (
+        <div className="mt-4 p-3 bg-[#1a1a2e] rounded-lg border border-[#D4AF37]">
+          <p className="text-xs font-semibold text-gray-400 mb-2 text-center">Recent Results</p>
+          <div className="flex flex-wrap justify-center gap-1">
+            {[...rouletteHistory].reverse().map((num, idx) => (
+              <div
+                key={`${num}-${idx}`}
+                className={`
+                  w-8 h-8 rounded-full flex items-center justify-center
+                  text-xs font-bold text-white border border-[#D4AF37]
+                  ${getHistoryColor(num)}
+                  ${idx === 0 ? 'ring-2 ring-yellow-400 ring-offset-1 ring-offset-[#1a1a2e]' : ''}
+                `}
+              >
+                {num}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Payout info */}
       <div className="mt-4 text-center text-xs text-gray-400">
