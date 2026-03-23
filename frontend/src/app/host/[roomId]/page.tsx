@@ -475,6 +475,7 @@ export default function HostPage() {
                     {room?.bet_options.map(opt => (
                       <div key={opt.id} className="flex items-center gap-3">
                         <span className="text-sm flex-1 truncate">{opt.label}</span>
+                        <span className="text-sm font-mono" style={{ color: 'var(--accent-glow)' }}>×{opt.odds?.toFixed(1) || '1.0'}</span>
                         <div className="flex items-center gap-2">
                           <input type="number" min="0" max="100"
                             value={editingProbs[opt.id] ?? Math.round((opt.probability || 0) * 100)}

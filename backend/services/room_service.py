@@ -14,6 +14,16 @@ class RoomService:
     def __init__(self, repository: RoomRepository):
         self._repo = repository
 
+    def _recalculate_odds_from_probabilities(self, room: GameRoom) -> None:
+        """Recalculate odds based on updated probabilities.
+
+        Args:
+            room: The game room with updated probabilities.
+        """
+        for option in room.bet_options:
+            if option.probability and option.probability > 0:
+                option.odds = round(1.0 / option.probability, 2)
+
     def create_room(
         self,
         host_id: str,
@@ -134,6 +144,9 @@ class RoomService:
             if option.id in probabilities:
                 option.probability = max(0.01, min(1.0, probabilities[option.id]))
         
+        # Recalculate odds based on new probabilities
+        self._recalculate_odds_from_probabilities(room)
+        
         self._repo.save(room)
         return room
 
@@ -155,6 +168,9 @@ class RoomService:
         
         for i, option in enumerate(room.bet_options):
             option.probability = round(normalized[i], 4)
+        
+        # Recalculate odds based on new probabilities
+        self._recalculate_odds_from_probabilities(room)
         
         self._repo.save(room)
         return room
