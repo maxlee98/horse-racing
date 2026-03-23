@@ -61,7 +61,7 @@ export default function RouletteTable({
 
   const isSelected = (optionId: string) => selectedOption === optionId;
 
-  // Column layout
+  // Column layout - numbers that go in each column (bottom to top in display)
   const column1 = [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34];
   const column2 = [2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35];
   const column3 = [3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36];
@@ -77,8 +77,8 @@ export default function RouletteTable({
         onClick={() => handleNumberClick(num)}
         disabled={disabled || !option}
         className={`
-          relative w-full aspect-square flex items-center justify-center
-          text-sm font-bold text-white border border-[#D4AF37]
+          w-full h-8 flex items-center justify-center
+          text-xs font-bold text-white border border-[#D4AF37]
           transition-all duration-150
           ${color === 'red' ? 'bg-red-600 hover:bg-red-500' : ''}
           ${color === 'black' ? 'bg-gray-900 hover:bg-gray-800' : ''}
@@ -92,216 +92,160 @@ export default function RouletteTable({
     );
   };
 
+  const ZeroCell = ({ num }: { num: number }) => {
+    const displayNum = num === 37 ? '00' : String(num);
+    const selected = isSelected(betOptions.find(o => o.label === displayNum)?.id || '');
+    
+    return (
+      <button
+        onClick={() => handleNumberClick(num)}
+        disabled={disabled}
+        className={`
+          w-full h-8 flex items-center justify-center
+          text-xs font-bold text-white border border-[#D4AF37]
+          bg-green-600 hover:bg-green-500
+          ${selected ? 'ring-2 ring-yellow-400 ring-inset' : ''}
+          ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+        `}
+      >
+        {displayNum}
+      </button>
+    );
+  };
+
+  const DozenButton = ({ type, label }: { type: RouletteBetType; label: string }) => {
+    const selected = isSelected(
+      betOptions.find(o => {
+        const lower = o.label.toLowerCase();
+        if (type === 'first_dozen') return lower.includes('1st') || lower.includes('first');
+        if (type === 'second_dozen') return lower.includes('2nd') || lower.includes('second');
+        if (type === 'third_dozen') return lower.includes('3rd') || lower.includes('third');
+        return false;
+      })?.id || ''
+    );
+    
+    return (
+      <button
+        onClick={() => handleBetTypeClick(type)}
+        disabled={disabled}
+        className={`
+          py-2 px-1 text-xs font-bold text-white border border-[#D4AF37]
+          bg-green-700 hover:bg-green-600
+          ${selected ? 'ring-2 ring-yellow-400 ring-inset bg-green-600' : ''}
+          ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+        `}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  const EvenMoneyButton = ({ type, label, bgClass }: { type: RouletteBetType; label: string; bgClass: string }) => {
+    const selected = isSelected(
+      betOptions.find(o => {
+        const lower = o.label.toLowerCase();
+        if (type === 'low') return lower.includes('1-18');
+        if (type === 'even') return lower === 'even';
+        if (type === 'red') return lower === 'red';
+        if (type === 'black') return lower === 'black';
+        if (type === 'odd') return lower === 'odd';
+        if (type === 'high') return lower.includes('19-36');
+        return false;
+      })?.id || ''
+    );
+    
+    return (
+      <button
+        onClick={() => handleBetTypeClick(type)}
+        disabled={disabled}
+        className={`
+          py-2 px-1 text-xs font-bold text-white border border-[#D4AF37]
+          ${bgClass}
+          ${selected ? 'ring-2 ring-yellow-400 ring-inset' : ''}
+          ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+        `}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  const ColumnButton = ({ type }: { type: RouletteBetType }) => {
+    const selected = isSelected(
+      betOptions.find(o => {
+        const lower = o.label.toLowerCase();
+        if (type === 'first_column') return lower.includes('column 1') || lower.includes('1st column');
+        if (type === 'second_column') return lower.includes('column 2') || lower.includes('2nd column');
+        if (type === 'third_column') return lower.includes('column 3') || lower.includes('3rd column');
+        return false;
+      })?.id || ''
+    );
+    
+    return (
+      <button
+        onClick={() => handleBetTypeClick(type)}
+        disabled={disabled}
+        className={`
+          py-2 px-1 text-xs font-bold text-white border border-[#D4AF37]
+          bg-green-700 hover:bg-green-600
+          ${selected ? 'ring-2 ring-yellow-400 ring-inset bg-green-600' : ''}
+          ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+        `}
+      >
+        2 to 1
+      </button>
+    );
+  };
+
   return (
     <div className="w-full max-w-2xl mx-auto p-4">
-      {/* Main table grid */}
-      <div className="bg-green-800 rounded-lg p-4 shadow-2xl border-4 border-[#8B4513]">
-        {/* Zero and Double Zero row */}
-        <div className="flex gap-1 mb-1">
-          <button
-            onClick={() => handleNumberClick(0)}
-            disabled={disabled}
-            className={`
-              w-12 h-24 flex items-center justify-center
-              text-sm font-bold text-white border border-[#D4AF37]
-              bg-green-600 hover:bg-green-500
-              ${isSelected(betOptions.find(o => o.label === '0')?.id || '') ? 'ring-2 ring-yellow-400 ring-inset' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            `}
-          >
-            0
-          </button>
-          <button
-            onClick={() => handleNumberClick(37)}
-            disabled={disabled}
-            className={`
-              w-12 h-24 flex items-center justify-center
-              text-sm font-bold text-white border border-[#D4AF37]
-              bg-green-600 hover:bg-green-500
-              ${isSelected(betOptions.find(o => o.label === '00')?.id || '') ? 'ring-2 ring-yellow-400 ring-inset' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            `}
-          >
-            00
-          </button>
+      {/* Main table grid using CSS Grid */}
+      <div className="bg-green-800 rounded-lg p-3 shadow-2xl border-4 border-[#8B4513]">
+        {/* Grid: [zeros | col3 | col2 | col1] */}
+        <div className="grid grid-cols-[1fr_1fr_1fr_1fr] gap-0.5">
           
-          {/* Number grid */}
-          <div className="flex gap-1 flex-1">
-            {/* Column 3 */}
-            <div className="flex flex-col gap-1 flex-1">
-              {column3.map(num => (
-                <NumberCell key={num} num={num} />
-              ))}
-            </div>
-            {/* Column 2 */}
-            <div className="flex flex-col gap-1 flex-1">
-              {column2.map(num => (
-                <NumberCell key={num} num={num} />
-              ))}
-            </div>
-            {/* Column 1 */}
-            <div className="flex flex-col gap-1 flex-1">
-              {column1.map(num => (
-                <NumberCell key={num} num={num} />
-              ))}
-            </div>
+          {/* Row 1: 0 and 00 combined, and column headers (2 to 1) */}
+          <div className="flex gap-0.5">
+            <ZeroCell num={0} />
+            <ZeroCell num={37} />
           </div>
-        </div>
-
-        {/* Dozens */}
-        <div className="flex gap-1 mt-1">
-          <button
-            onClick={() => handleBetTypeClick('first_dozen')}
-            disabled={disabled}
-            className={`
-              flex-1 py-3 text-sm font-bold text-white border border-[#D4AF37]
-              bg-green-700 hover:bg-green-600
-              ${isSelected(betOptions.find(o => o.label.toLowerCase().includes('1st') || o.label.toLowerCase().includes('first'))?.id || '') ? 'ring-2 ring-yellow-400 ring-inset bg-green-600' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            `}
-          >
-            1st 12
-          </button>
-          <button
-            onClick={() => handleBetTypeClick('second_dozen')}
-            disabled={disabled}
-            className={`
-              flex-1 py-3 text-sm font-bold text-white border border-[#D4AF37]
-              bg-green-700 hover:bg-green-600
-              ${isSelected(betOptions.find(o => o.label.toLowerCase().includes('2nd') || o.label.toLowerCase().includes('second'))?.id || '') ? 'ring-2 ring-yellow-400 ring-inset bg-green-600' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            `}
-          >
-            2nd 12
-          </button>
-          <button
-            onClick={() => handleBetTypeClick('third_dozen')}
-            disabled={disabled}
-            className={`
-              flex-1 py-3 text-sm font-bold text-white border border-[#D4AF37]
-              bg-green-700 hover:bg-green-600
-              ${isSelected(betOptions.find(o => o.label.toLowerCase().includes('3rd') || o.label.toLowerCase().includes('third'))?.id || '') ? 'ring-2 ring-yellow-400 ring-inset bg-green-600' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            `}
-          >
-            3rd 12
-          </button>
-        </div>
-
-        {/* Even money bets */}
-        <div className="flex gap-1 mt-1">
-          <button
-            onClick={() => handleBetTypeClick('low')}
-            disabled={disabled}
-            className={`
-              flex-1 py-3 text-sm font-bold text-white border border-[#D4AF37]
-              bg-green-700 hover:bg-green-600
-              ${isSelected(betOptions.find(o => o.label.toLowerCase().includes('1-18'))?.id || '') ? 'ring-2 ring-yellow-400 ring-inset bg-green-600' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            `}
-          >
-            1-18
-          </button>
-          <button
-            onClick={() => handleBetTypeClick('even')}
-            disabled={disabled}
-            className={`
-              flex-1 py-3 text-sm font-bold text-white border border-[#D4AF37]
-              bg-green-700 hover:bg-green-600
-              ${isSelected(betOptions.find(o => o.label.toLowerCase() === 'even')?.id || '') ? 'ring-2 ring-yellow-400 ring-inset bg-green-600' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            `}
-          >
-            EVEN
-          </button>
-          <button
-            onClick={() => handleBetTypeClick('red')}
-            disabled={disabled}
-            className={`
-              flex-1 py-3 text-sm font-bold text-white border border-[#D4AF37]
-              bg-red-600 hover:bg-red-500
-              ${isSelected(betOptions.find(o => o.label.toLowerCase() === 'red')?.id || '') ? 'ring-2 ring-yellow-400 ring-inset bg-red-500' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            `}
-          >
-            RED
-          </button>
-          <button
-            onClick={() => handleBetTypeClick('black')}
-            disabled={disabled}
-            className={`
-              flex-1 py-3 text-sm font-bold text-white border border-[#D4AF37]
-              bg-gray-900 hover:bg-gray-800
-              ${isSelected(betOptions.find(o => o.label.toLowerCase() === 'black')?.id || '') ? 'ring-2 ring-yellow-400 ring-inset bg-gray-800' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            `}
-          >
-            BLACK
-          </button>
-          <button
-            onClick={() => handleBetTypeClick('odd')}
-            disabled={disabled}
-            className={`
-              flex-1 py-3 text-sm font-bold text-white border border-[#D4AF37]
-              bg-green-700 hover:bg-green-600
-              ${isSelected(betOptions.find(o => o.label.toLowerCase() === 'odd')?.id || '') ? 'ring-2 ring-yellow-400 ring-inset bg-green-600' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            `}
-          >
-            ODD
-          </button>
-          <button
-            onClick={() => handleBetTypeClick('high')}
-            disabled={disabled}
-            className={`
-              flex-1 py-3 text-sm font-bold text-white border border-[#D4AF37]
-              bg-green-700 hover:bg-green-600
-              ${isSelected(betOptions.find(o => o.label.toLowerCase().includes('19-36'))?.id || '') ? 'ring-2 ring-yellow-400 ring-inset bg-green-600' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            `}
-          >
-            19-36
-          </button>
-        </div>
-
-        {/* Column bets */}
-        <div className="flex gap-1 mt-1 ml-14">
-          <button
-            onClick={() => handleBetTypeClick('first_column')}
-            disabled={disabled}
-            className={`
-              flex-1 py-2 text-sm font-bold text-white border border-[#D4AF37]
-              bg-green-700 hover:bg-green-600
-              ${isSelected(betOptions.find(o => o.label.toLowerCase().includes('column 1') || o.label.toLowerCase().includes('1st column'))?.id || '') ? 'ring-2 ring-yellow-400 ring-inset bg-green-600' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            `}
-          >
-            2 to 1
-          </button>
-          <button
-            onClick={() => handleBetTypeClick('second_column')}
-            disabled={disabled}
-            className={`
-              flex-1 py-2 text-sm font-bold text-white border border-[#D4AF37]
-              bg-green-700 hover:bg-green-600
-              ${isSelected(betOptions.find(o => o.label.toLowerCase().includes('column 2') || o.label.toLowerCase().includes('2nd column'))?.id || '') ? 'ring-2 ring-yellow-400 ring-inset bg-green-600' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            `}
-          >
-            2 to 1
-          </button>
-          <button
-            onClick={() => handleBetTypeClick('third_column')}
-            disabled={disabled}
-            className={`
-              flex-1 py-2 text-sm font-bold text-white border border-[#D4AF37]
-              bg-green-700 hover:bg-green-600
-              ${isSelected(betOptions.find(o => o.label.toLowerCase().includes('column 3') || o.label.toLowerCase().includes('3rd column'))?.id || '') ? 'ring-2 ring-yellow-400 ring-inset bg-green-600' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            `}
-          >
-            2 to 1
-          </button>
+          <ColumnButton type="third_column" />
+          <ColumnButton type="second_column" />
+          <ColumnButton type="first_column" />
+          
+          {/* Number rows */}
+          {[...Array(12)].map((_, rowIndex) => (
+            <>
+              {/* Empty space in zero column */}
+              <div key={`zero-${rowIndex}`} className="h-10" />
+              
+              {/* Column 3 numbers (displayed top to bottom) */}
+              <NumberCell key={`c3-${rowIndex}`} num={column3[11 - rowIndex]} />
+              
+              {/* Column 2 numbers */}
+              <NumberCell key={`c2-${rowIndex}`} num={column2[11 - rowIndex]} />
+              
+              {/* Column 1 numbers */}
+              <NumberCell key={`c1-${rowIndex}`} num={column1[11 - rowIndex]} />
+            </>
+          ))}
+          
+          {/* Dozens row */}
+          <div className="col-span-4 grid grid-cols-3 gap-0.5 mt-1">
+            <DozenButton type="first_dozen" label="1st 12" />
+            <DozenButton type="second_dozen" label="2nd 12" />
+            <DozenButton type="third_dozen" label="3rd 12" />
+          </div>
+          
+          {/* Even money bets row */}
+          <div className="col-span-4 grid grid-cols-6 gap-0.5 mt-1">
+            <EvenMoneyButton type="low" label="1-18" bgClass="bg-green-700 hover:bg-green-600" />
+            <EvenMoneyButton type="even" label="EVEN" bgClass="bg-green-700 hover:bg-green-600" />
+            <EvenMoneyButton type="red" label="RED" bgClass="bg-red-600 hover:bg-red-500" />
+            <EvenMoneyButton type="black" label="BLACK" bgClass="bg-gray-900 hover:bg-gray-800" />
+            <EvenMoneyButton type="odd" label="ODD" bgClass="bg-green-700 hover:bg-green-600" />
+            <EvenMoneyButton type="high" label="19-36" bgClass="bg-green-700 hover:bg-green-600" />
+          </div>
         </div>
       </div>
 
