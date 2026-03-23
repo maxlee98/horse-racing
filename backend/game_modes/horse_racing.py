@@ -137,7 +137,7 @@ class HorseRacingMode(GameModeStrategy):
         final_positions.sort(key=lambda x: x["rank"])
         winner = next((opt for opt in room.bet_options if opt.id == winner_id), None)
         
-        # Show race complete
+        # Show race complete and send final results immediately
         await broadcast({
             "type": "race_progress",
             "data": {
@@ -148,23 +148,6 @@ class HorseRacingMode(GameModeStrategy):
                 "winner_id": winner_id
             }
         })
-        
-        await asyncio.sleep(2)
-        
-        # Countdown
-        for count in [3, 2, 1]:
-            await broadcast({
-                "type": "race_progress",
-                "data": {
-                    "positions": final_positions,
-                    "progress": 1.0,
-                    "race_complete": True,
-                    "countdown": count,
-                    "message": f"Winner revealed in {count}...",
-                    "winner_id": winner_id
-                }
-            })
-            await asyncio.sleep(1)
         
         # Send final results
         await broadcast({

@@ -95,23 +95,7 @@ class RouletteMode(GameModeStrategy):
         await self._run_deceleration_phase(broadcast, target_wheel_rotation, winning_index, pocket_angle, ball_offset)
         await self._run_settling_phase(broadcast, target_wheel_rotation, winning_index, pocket_angle, ball_offset)
         
-        # Countdown before revealing
-        for count in [3, 2, 1]:
-            await broadcast({
-                "type": "roulette_progress",
-                "data": {
-                    "phase": "revealing",
-                    "countdown": count,
-                    "wheel_rotation": round(target_wheel_rotation % 360, 2),
-                    "ball_position": round(winning_index * pocket_angle + ball_offset, 2),
-                    "ball_radius": 60,
-                    "progress": 0.95 + (4 - count) * 0.017,
-                    "message": f"Revealing in {count}..."
-                }
-            })
-            await asyncio.sleep(1)
-        
-        # Set winner
+        # Set winner immediately
         room.status = GameStatus.ENDED
         winning_option_id = self._find_winning_option(room, winning_number)
         room.winner_option_id = winning_option_id
