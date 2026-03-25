@@ -1,7 +1,7 @@
 """Tests for RoomService."""
 
 import pytest
-from core.models import GameRoom, GameStatus, GameMode, Player, BetOption
+from core.models import GameRoom, GameStatus, GameMode, Player, BetOption, Bet
 from core.constants import GameConstants
 from core.exceptions import RoomNotFoundException, NotAuthorizedException
 
@@ -263,3 +263,144 @@ class TestToDict:
         
         for field in required_fields:
             assert field in data
+
+
+class TestChangeGame:
+    """Tests for changing game modes."""
+
+    def test_change_game_success(self, room_service, sample_room):
+        """Host can change game mode from standard to horse racing."""
+        room = room_service.change_game(
+            sample_room.room_id,
+            GameMode.HORSE_RACING,
+            sample_room.host_id
+        )
+        
+        assert room.game_mode == GameMode.HORSE_RACING
+        assert room.status == GameStatus.WAITING
+        # Should have horse racing default options
+        assert len(room.bet_options) == 5
+        assert room.bet_options[0].label == "Thunder Bolt"
+
+    def test_change_game_to_roulette(self, room_service, sample_room):
+        """Host can change game mode to roulette."""
+        room = room_service.change_game(
+            sample_room.room_id,
+            GameMode.ROULETTE,
+            sample_room.host_id
+        )
+        
+        assert room.game_mode == GameMode.ROULETTE
+        assert room.status == GameStatus.WAITING
+        # Should have full roulette preset options (50 options)
+        assert len(room.bet_options) == 50
+
+    def test_change_game_clears_bets(self, room_service, sample_room):
+        """Changing game clears existing bets."""
+        # Setup: Add some bets
+        sample_room.bets = [Bet(
+            player_id="p1",
+            player_name="Player 1",
+            option_id="1",
+            option_label="Team A",
+            amount=100,
+            potential_win=200
+        )]
+        room_service._repo.save(sample_room)
+        
+        room = room_service.change_game(
+            sample_room.room_id,
+            GameMode.HORSE_RACING,
+            sample_room.host_id
+        )
+        
+        assert len(room.bets) == 0
+
+    def test_change_game_clears_winner(self, room_service, sample_room):
+        """Changing game clears winner."""
+        # Setup: Set a winner
+        sample_room.winner_option_id = "1"
+        sample_room.status = GameStatus.ENDED
+        room_service._repo.save(sample_room)
+        
+        room = room_service.change_game(
+            sample_room.room_id,
+            GameMode.HORSE_RACING,
+            sample_room.host_id
+        )
+        
+        assert room.winner_option_id is None
+        assert room.status == GameStatus.WAITING
+
+    def test_change_game_preserves_player_balances(self, room_service, sample_room):
+        """Player balances are preserved when changing games."""
+        # Setup: Add players with spent balances
+        sample_room.players["p1"] = Player(id="p1", name="P1", balance=500, is_connected=True)
+        sample_room.players["p2"] = Player(id="p2", name="P2", balance=750, is_connected=True)
+        room_service._repo.save(sample_room)
+        
+        room = room_service.change_game(
+            sample_room.room_id,
+            GameMode.HORSE_RACING,
+            sample_room.host_id
+        )
+        
+        assert room.players["p1"].balance == 500
+        assert room.players["p2"].balance == 750
+
+    def test_change_game_clears_roulette_history(self, room_service):
+        """Roulette history is cleared when leaving roulette mode."""
+        # Create a roulette room
+        room = room_service.create_room(
+            host_id="host-1",
+            title="Roulette Room",
+            description="",
+            bet_options=[],
+            game_mode=GameMode.ROULETTE,
+        )
+        room.roulette_history = ["7", "12", "00"]
+        room_service._repo.save(room)
+        
+        # Change to horse racing
+        updated_room = room_service.change_game(
+            room.room_id,
+            GameMode.HORSE_RACING,
+            "host-1"
+        )
+        
+        assert len(updated_room.roulette_history) == 0
+
+    def test_change_game_blocked_when_locked(self, room_service, sample_room):
+        """Cannot change game while game is in progress."""
+        sample_room.status = GameStatus.LOCKED
+        room_service._repo.save(sample_room)
+        
+        from core.exceptions import InvalidOperationException
+        with pytest.raises(InvalidOperationException, match="Cannot change game while game is in progress"):
+            room_service.change_game(
+                sample_room.room_id,
+                GameMode.HORSE_RACING,
+                sample_room.host_id
+            )
+
+    def test_change_game_unauthorized(self, room_service, sample_room):
+        """Non-host cannot change game."""
+        with pytest.raises(NotAuthorizedException, match="Only host can change game mode"):
+            room_service.change_game(
+                sample_room.room_id,
+                GameMode.HORSE_RACING,
+                "not-the-host"
+            )
+
+    def test_change_game_recalculates_probabilities(self, room_service, sample_room):
+        """Probabilities are recalculated for new game mode."""
+        room = room_service.change_game(
+            sample_room.room_id,
+            GameMode.HORSE_RACING,
+            sample_room.host_id
+        )
+        
+        # Horse racing uses inverse odds for probability calculation
+        # Thunder Bolt has odds 2.5, so probability = 1/2.5 = 0.4
+        assert room.bet_options[0].probability > 0
+        assert sum(opt.probability for opt in room.bet_options) == pytest.approx(1.0, rel=0.01)

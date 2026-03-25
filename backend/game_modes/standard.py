@@ -2,7 +2,7 @@
 
 import random
 from typing import Optional, Callable, Any
-from core.models import GameRoom, Bet, GameStatus
+from core.models import GameRoom, Bet, GameStatus, BetOption
 from .base import GameModeStrategy
 
 
@@ -12,6 +12,13 @@ class StandardGameMode(GameModeStrategy):
     @property
     def name(self) -> str:
         return "standard"
+
+    def initialize_default_options(self, room: GameRoom) -> None:
+        """Set up standard betting options (generic)."""
+        room.bet_options = [
+            BetOption(id="standard_opt_1", label="Option A", odds=2.0, probability=0.5),
+            BetOption(id="standard_opt_2", label="Option B", odds=2.0, probability=0.5),
+        ]
 
     def calculate_probabilities(self, room: GameRoom) -> None:
         """Calculate probabilities based on inverse odds."""

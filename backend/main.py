@@ -18,6 +18,7 @@ from core.exceptions import (
     NotAuthorizedException,
     InvalidBetException,
     RoomFullException,
+    InvalidOperationException,
 )
 from repositories import InMemoryRoomRepository
 from services import RoomService, BettingService, PlayerService
@@ -473,6 +474,45 @@ async def _handle_host_action(
                 "room_state": room_service.to_dict(room)
             }
         })
+
+    elif action == "change_game":
+        # Change the game mode of the room
+        new_game_mode_str = data.get("game_mode")
+        
+        # Map string to enum
+        game_mode_map = {
+            "standard": GameMode.STANDARD,
+            "horse_racing": GameMode.HORSE_RACING,
+            "roulette": GameMode.ROULETTE,
+        }
+        new_game_mode = game_mode_map.get(new_game_mode_str)
+        
+        if not new_game_mode:
+            await websocket.send_json({
+                "type": WSMessageType.ERROR,
+                "data": {"message": f"Invalid game mode: {new_game_mode_str}"}
+            })
+            return
+        
+        try:
+            room = room_service.change_game(room_id, new_game_mode, host_id)
+            
+            # Broadcast change to ALL clients (including host)
+            await ws_manager.broadcast(room_id, {
+                "type": WSMessageType.GAME_MODE_CHANGED,
+                "data": {
+                    "new_game_mode": new_game_mode_str,
+                    "message": f"Game changed to {new_game_mode_str}!",
+                    "room_state": room_service.to_dict(room)
+                }
+            })
+            await broadcast_room_state()
+            
+        except InvalidOperationException as e:
+            await websocket.send_json({
+                "type": WSMessageType.ERROR,
+                "data": {"message": str(e)}
+            })
 
 
 # ─── Health Check ────────────────────────────────────────────────────────────

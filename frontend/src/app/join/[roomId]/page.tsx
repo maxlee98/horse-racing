@@ -209,6 +209,39 @@ export default function JoinPage() {
         };
       });
     }
+
+    // Handle game mode changed
+    if (msg.type === 'game_mode_changed') {
+      const data = msg.data as {
+        new_game_mode: 'standard' | 'horse_racing' | 'roulette';
+        room_state: RoomState;
+        message?: string;
+      };
+      
+      // Update room state
+      setRoom(data.room_state);
+      setMyBets(data.room_state.bets.filter(b => b.player_id === playerId));
+      
+      // Reset game-specific state
+      setRaceState({ is_racing: false, positions: [], progress: 0, winner_id: null });
+      setRouletteState({ 
+        is_spinning: false, 
+        wheel_rotation: 0, 
+        ball_position: 0, 
+        ball_radius: 100, 
+        winning_number: null, 
+        winning_color: null, 
+        phase: null, 
+        progress: 0 
+      });
+      setGameResults(null);
+      setSelectedOption('');
+      setSelectedBetType(null);
+      setSelectedNumber(undefined);
+      
+      // Notify player
+      notify(data.message || `🎮 Game changed to ${data.new_game_mode}!`);
+    }
   }, [playerId, myBets]);
 
   const { connected, send } = useWebSocket({ roomId, clientId: playerId, onMessage: handleMessage });

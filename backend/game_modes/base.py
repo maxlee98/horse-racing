@@ -48,6 +48,14 @@ class GameModeStrategy(ABC):
         """Get the payout multiplier for a bet."""
         pass
 
+    def initialize_default_options(self, room: GameRoom) -> None:
+        """Initialize default bet options for this game mode.
+        
+        Override in subclasses to provide game-specific default options.
+        Called when switching game modes.
+        """
+        pass
+
     def on_round_start(self, room: GameRoom) -> None:
         """Hook called when a new round starts. Override if needed."""
         pass

@@ -2,7 +2,7 @@
 
 
 class GameException(Exception):
-    """Base exception for game-related errors."""
+    """Base exception for all game-related errors."""
     pass
 
 
@@ -12,7 +12,7 @@ class RoomNotFoundException(GameException):
 
 
 class NotAuthorizedException(GameException):
-    """Raised when a user is not authorized for an action."""
+    """Raised when a user is not authorized to perform an action."""
     pass
 
 
@@ -22,7 +22,12 @@ class InvalidBetException(GameException):
 
 
 class RoomFullException(GameException):
-    """Raised when trying to join a full room."""
+    """Raised when a room is full."""
+    pass
+
+
+class InvalidOperationException(GameException):
+    """Raised when an operation cannot be performed in current state."""
     pass
 
 

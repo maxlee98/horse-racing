@@ -3,7 +3,7 @@
 import random
 import asyncio
 from typing import Optional, Callable, Any
-from core.models import GameRoom, Bet, GameStatus
+from core.models import GameRoom, Bet, GameStatus, BetOption
 from .base import GameModeStrategy
 
 
@@ -13,6 +13,26 @@ class HorseRacingMode(GameModeStrategy):
     @property
     def name(self) -> str:
         return "horse_racing"
+
+    def initialize_default_options(self, room: GameRoom) -> None:
+        """Set up horse racing options with named horses."""
+        horses = [
+            ("Thunder Bolt", 2.5),
+            ("Midnight Runner", 3.0),
+            ("Golden Mane", 2.0),
+            ("Silver Streak", 4.0),
+            ("Wild Spirit", 3.5),
+        ]
+        n = len(horses)
+        room.bet_options = [
+            BetOption(
+                id=f"horse_{i}",
+                label=name,
+                odds=odds,
+                probability=round(1.0 / n, 4)
+            )
+            for i, (name, odds) in enumerate(horses)
+        ]
 
     def calculate_probabilities(self, room: GameRoom) -> None:
         """Calculate probabilities based on inverse odds."""

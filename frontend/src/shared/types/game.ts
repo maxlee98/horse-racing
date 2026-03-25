@@ -23,7 +23,8 @@ export type WSMessageType =
   | 'roulette_started'
   | 'roulette_progress'
   | 'roulette_ball_settling'
-  | 'roulette_ended';
+  | 'roulette_ended'
+  | 'game_mode_changed';
 
 export type RouletteBetType =
   | 'single'

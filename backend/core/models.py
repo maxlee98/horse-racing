@@ -106,3 +106,4 @@ class WSMessageType(str, Enum):
     ROULETTE_BALL_SETTLING = "roulette_ball_settling"
     ROULETTE_ENDED = "roulette_ended"
     ROULETTE_REVEALED = "roulette_revealed"  # Host clicked Close, reveal results to players
+    GAME_MODE_CHANGED = "game_mode_changed"  # Room changed game mode

@@ -140,6 +140,38 @@ export default function HostPage() {
         winning_bets: data.winning_bets,
       }));
     }
+
+    // Handle game mode changed
+    if (msg.type === 'game_mode_changed') {
+      const data = msg.data as {
+        new_game_mode: 'standard' | 'horse_racing' | 'roulette';
+        room_state: RoomState;
+      };
+      
+      // Update room state
+      setRoom(data.room_state);
+      
+      // Reset game-specific state
+      setRaceState({ is_racing: false, positions: [], progress: 0, winner_id: null });
+      setRaceResults(null);
+      setRouletteState({ 
+        is_spinning: false, 
+        wheel_rotation: 0, 
+        ball_position: 0, 
+        ball_radius: 100, 
+        winning_number: null, 
+        winning_color: null, 
+        phase: null, 
+        progress: 0 
+      });
+      
+      // Update editing probabilities
+      const probs: Record<string, number> = {};
+      data.room_state.bet_options.forEach(opt => {
+        probs[opt.id] = Math.round((opt.probability || 0) * 100);
+      });
+      setEditingProbs(probs);
+    }
   }, []);
 
   const { connected, send } = useWebSocket({
@@ -459,6 +491,44 @@ export default function HostPage() {
                 )}
                 <ControlBtn onClick={() => hostAction('reset_lobby')} color="var(--red)">🔄 Reset Lobby</ControlBtn>
               </div>
+            </div>
+
+            {/* Game Mode Selector */}
+            <div className="card p-5">
+              <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>Game Mode</p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { mode: 'standard', label: 'Standard', icon: '🎲' },
+                  { mode: 'horse_racing', label: 'Horse Racing', icon: '🏇' },
+                  { mode: 'roulette', label: 'Roulette', icon: '🎰' },
+                ].map(({ mode, label, icon }) => (
+                  <button
+                    key={mode}
+                    onClick={() => {
+                      if (room?.game_mode !== mode && confirm(`Change game to ${mode}? All current bets will be cleared.`)) {
+                        hostAction('change_game', { game_mode: mode });
+                      }
+                    }}
+                    disabled={room?.status === 'locked' || room?.game_mode === mode}
+                    className="flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all flex flex-col items-center gap-1"
+                    style={{
+                      background: room?.game_mode === mode ? 'var(--accent-soft)' : 'var(--bg-elevated)',
+                      border: `1px solid ${room?.game_mode === mode ? 'var(--accent)' : 'var(--border)'}`,
+                      color: room?.game_mode === mode ? 'var(--accent-glow)' : 'var(--text)',
+                      opacity: room?.status === 'locked' ? 0.5 : 1,
+                      cursor: room?.status === 'locked' || room?.game_mode === mode ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    <span className="text-lg">{icon}</span>
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+              {room?.status === 'locked' && (
+                <p className="text-xs mt-2 text-center" style={{ color: 'var(--text-muted)' }}>
+                  Cannot change game while game is in progress
+                </p>
+              )}
             </div>
 
             {room?.game_mode !== 'roulette' && (

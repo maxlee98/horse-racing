@@ -227,6 +227,62 @@ class RoomService:
         
         return self._repo.delete(room_id)
 
+    def change_game(self, room_id: str, new_game_mode: GameMode, host_id: str) -> GameRoom:
+        """Change the game mode of an existing room.
+        
+        Args:
+            room_id: The room to change.
+            new_game_mode: The new game mode to switch to.
+            host_id: The ID of the host making the change.
+            
+        Returns:
+            The updated room with the new game mode.
+            
+        Raises:
+            NotAuthorizedException: If the caller is not the host.
+            InvalidOperationException: If the game is currently in progress.
+            
+        Note:
+            - Player balances are preserved when changing games.
+            - Current bets are cleared.
+            - Game-specific state (like roulette_history) is reset.
+        """
+        from core.exceptions import InvalidOperationException
+        
+        room = self.get_room_or_raise(room_id)
+        
+        if room.host_id != host_id:
+            raise NotAuthorizedException("Only host can change game mode")
+        
+        if room.status == GameStatus.LOCKED:
+            raise InvalidOperationException("Cannot change game while game is in progress")
+        
+        # Store the old game mode for any cleanup
+        old_game_mode = room.game_mode
+        
+        # Update game mode
+        room.game_mode = new_game_mode
+        
+        # Clear game state - but preserve player balances
+        room.bets = []
+        room.winner_option_id = None
+        room.status = GameStatus.WAITING
+        
+        # Clear game-specific data
+        if old_game_mode == GameMode.ROULETTE:
+            room.roulette_history = []
+        
+        # Generate new bet options for the new game mode
+        game_mode_strategy = get_game_mode(new_game_mode.value)
+        game_mode_strategy.initialize_default_options(room)
+        
+        # Calculate probabilities for the new options
+        game_mode_strategy.calculate_probabilities(room)
+        
+        # Save and return
+        self._repo.save(room)
+        return room
+
     def to_dict(self, room: GameRoom) -> dict:
         """Convert room to dictionary for API response."""
         return {

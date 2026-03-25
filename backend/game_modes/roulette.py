@@ -39,6 +39,14 @@ class RouletteMode(GameModeStrategy):
     def name(self) -> str:
         return "roulette"
 
+    def initialize_default_options(self, room: GameRoom) -> None:
+        """Set up roulette options using the full preset."""
+        preset = self.get_preset_options()
+        room.bet_options = [
+            BetOption(id=opt["id"], label=opt["label"], odds=opt["odds"], probability=round(1.0/38, 4))
+            for opt in preset
+        ]
+
     def calculate_probabilities(self, room: GameRoom) -> None:
         """Calculate roulette-specific probabilities."""
         for opt in room.bet_options:
