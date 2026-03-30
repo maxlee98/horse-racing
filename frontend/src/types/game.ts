@@ -31,6 +31,8 @@ export interface RacePosition {
   rank?: number;  // Position in race (1st, 2nd, etc.)
   finish_time?: number;  // Time in seconds to finish
   is_winner?: boolean;  // Whether this horse is the winner
+  momentum?: number;        // Momentum factor: -0.2 to +0.3 range
+  momentum_surge?: boolean; // True if momentum > 0.2 (significant speed burst)
 }
 
 export interface RaceResults {

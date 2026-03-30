@@ -50,7 +50,7 @@ class HorseRacingMode(GameModeStrategy):
         room: GameRoom,
         broadcast: Callable[[dict], Any]
     ) -> tuple[bool, str, Optional[str]]:
-        """Run horse race animation."""
+        """Run horse race animation with momentum-based speed changes."""
         import time
         start_time = time.time()
         
@@ -69,6 +69,17 @@ class HorseRacingMode(GameModeStrategy):
         horse_ranks: dict[str, int] = {}
         current_rank = 1
         
+        # Momentum tracking - horses behind gain speed, horses ahead lose speed
+        horse_momentum: dict[str, float] = {opt.id: 0.0 for opt in room.bet_options}
+        
+        # Momentum mechanics constants
+        max_momentum_boost = 0.30   # max 30% speed boost when behind
+        max_momentum_penalty = 0.20  # max 20% speed penalty when ahead
+        momentum_decay = 0.05         # base momentum changes per tick
+        momentum_random_factor = 0.03 # random noise added to momentum changes
+        surge_chance = 0.05          # 5% chance per horse per tick for random surge
+        surge_strength = 0.15        # strength of random momentum surge
+        
         # Race parameters
         max_race_time = 15.0
         elapsed = 0.0
@@ -78,17 +89,62 @@ class HorseRacingMode(GameModeStrategy):
             await asyncio.sleep(step_duration)
             elapsed += step_duration
             
+            # Calculate average position of all racing horses
+            racing_positions = [
+                horse_positions[opt.id] 
+                for opt in room.bet_options 
+                if opt.id not in horse_finish_times
+            ]
+            avg_position = sum(racing_positions) / len(racing_positions) if racing_positions else 50.0
+            
             # Update each horse
             for opt in room.bet_options:
                 if opt.id in horse_finish_times:
                     continue
                 
-                # Speed based on probability
+                current_pos = horse_positions[opt.id]
+                
+                # Calculate momentum based on relative position
+                if current_pos < avg_position:
+                    # Behind: gain positive momentum (speeding up)
+                    base_change = momentum_decay * (avg_position - current_pos) / 50
+                    # Random element - can be 0.5x to 1.5x the base
+                    random_multiplier = random.uniform(0.5, 1.5)
+                    momentum_change = base_change * random_multiplier
+                    
+                    horse_momentum[opt.id] = min(
+                        horse_momentum[opt.id] + momentum_change, 
+                        max_momentum_boost
+                    )
+                else:
+                    # Ahead: lose momentum (slowing down)
+                    base_change = momentum_decay * (current_pos - avg_position) / 50
+                    random_multiplier = random.uniform(0.5, 1.5)
+                    momentum_change = base_change * random_multiplier
+                    
+                    horse_momentum[opt.id] = max(
+                        horse_momentum[opt.id] - momentum_change, 
+                        -max_momentum_penalty
+                    )
+                
+                # Random momentum surge - any horse can burst forward or slow down
+                if random.random() < surge_chance:
+                    surge_direction = random.choice([1, -1])
+                    surge_amount = random.uniform(surge_strength * 0.5, surge_strength)
+                    horse_momentum[opt.id] += surge_direction * surge_amount
+                    # Clamp to bounds
+                    horse_momentum[opt.id] = max(
+                        -max_momentum_penalty, 
+                        min(max_momentum_boost, horse_momentum[opt.id])
+                    )
+                
+                # Apply momentum to speed
                 base_speed = 100 / (8 + (1 - opt.probability) * 7)
                 speed_variation = random.uniform(0.8, 1.2)
-                speed = base_speed * speed_variation
+                momentum_multiplier = 1.0 + horse_momentum[opt.id]
+                speed = base_speed * speed_variation * momentum_multiplier
                 
-                new_position = horse_positions[opt.id] + speed * step_duration
+                new_position = current_pos + speed * step_duration
                 
                 if new_position >= 100.0:
                     new_position = 100.0
@@ -98,17 +154,32 @@ class HorseRacingMode(GameModeStrategy):
                 
                 horse_positions[opt.id] = new_position
             
-            # Send progress update
+            # Send progress update with momentum data
             positions = []
+            dramatic_event = None
             for opt in room.bet_options:
+                current_pos = horse_positions[opt.id]
+                momentum = horse_momentum[opt.id]
+                momentum_surge = momentum > 0.2
+                
                 positions.append({
                     "option_id": opt.id,
                     "label": opt.label,
-                    "position": round(horse_positions[opt.id], 1),
+                    "position": round(current_pos, 1),
                     "probability": opt.probability,
                     "rank": horse_ranks.get(opt.id, 0),
-                    "finish_time": round(horse_finish_times.get(opt.id, 0), 2) if opt.id in horse_finish_times else None
+                    "finish_time": round(horse_finish_times.get(opt.id, 0), 2) if opt.id in horse_finish_times else None,
+                    "momentum": round(momentum, 3),
+                    "momentum_surge": momentum_surge,
                 })
+                
+                # Detect dramatic events
+                if momentum > 0.15 and current_pos < avg_position - 10:
+                    dramatic_event = f"🔥 {opt.label} is making a comeback!"
+                elif momentum < -0.10 and current_pos > avg_position + 10:
+                    dramatic_event = f"💨 {opt.label} is fading!"
+                elif abs(momentum) > 0.25:
+                    dramatic_event = f"⚡ {opt.label} gets a sudden burst!"
             
             progress = len(horse_finish_times) / len(room.bet_options)
             
@@ -118,7 +189,8 @@ class HorseRacingMode(GameModeStrategy):
                     "positions": positions,
                     "progress": progress,
                     "elapsed_time": round(elapsed, 2),
-                    "finished_count": len(horse_finish_times)
+                    "finished_count": len(horse_finish_times),
+                    "dramatic_event": dramatic_event,
                 }
             })
         

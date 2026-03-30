@@ -96,6 +96,8 @@ export interface RacePosition {
   rank?: number;
   finish_time?: number;
   is_winner?: boolean;
+  momentum?: number;        // Momentum factor: -0.2 to +0.3 range
+  momentum_surge?: boolean; // True if momentum > 0.2 (significant speed burst)
 }
 
 export interface RaceState {

@@ -286,6 +286,8 @@ export default function HostPage() {
                       const rank = pos.rank || 0;
                       const rankDisplay = rank > 0 ? `${rank}${rank === 1 ? 'st' : rank === 2 ? 'nd' : rank === 3 ? 'rd' : 'th'}` : '-';
                       const hasFinished = pos.finish_time !== undefined && pos.finish_time !== null;
+                      const momentum = pos.momentum ?? 0;
+                      const momentumIcon = pos.momentum_surge ? '⚡' : momentum > 0.05 ? '🔥' : momentum < -0.05 ? '💨' : '';
                       
                       return (
                         <div key={pos.option_id}>
@@ -294,6 +296,11 @@ export default function HostPage() {
                             <span className={`text-sm font-medium w-32 truncate ${isWinner ? 'font-black text-green-400' : ''}`}>
                               {pos.label}
                             </span>
+                            {momentumIcon && (
+                              <span className={`text-sm animate-pulse ${momentum > 0 ? 'text-orange-400' : 'text-blue-300'}`}>
+                                {momentumIcon}
+                              </span>
+                            )}
                             <span className="text-xs px-2 py-0.5 rounded" style={{ 
                               background: rank === 1 ? 'rgba(34, 197, 94, 0.2)' : rank === 2 ? 'rgba(234, 179, 8, 0.2)' : rank === 3 ? 'rgba(249, 115, 22, 0.2)' : 'var(--bg-elevated)',
                               color: rank === 1 ? '#4ade80' : rank === 2 ? '#facc15' : rank === 3 ? '#fb923c' : 'var(--text-muted)',

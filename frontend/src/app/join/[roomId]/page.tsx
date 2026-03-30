@@ -335,6 +335,8 @@ export default function JoinPage() {
                       const isWinner = pos.is_winner;
                       const rank = pos.rank || (index + 1);
                       const rankSuffix = rank === 1 ? 'st' : rank === 2 ? 'nd' : rank === 3 ? 'rd' : 'th';
+                      const momentum = pos.momentum ?? 0;
+                      const momentumIcon = pos.momentum_surge ? '⚡' : momentum > 0.05 ? '🔥' : momentum < -0.05 ? '💨' : '';
                       
                       return (
                         <div key={pos.option_id}>
@@ -344,6 +346,11 @@ export default function JoinPage() {
                               {pos.label}
                               {isWinner && <span className="ml-2 text-green-400 font-black">WINNER!</span>}
                             </span>
+                            {momentumIcon && (
+                              <span className={`text-sm animate-pulse ${momentum > 0 ? 'text-orange-400' : 'text-blue-300'}`}>
+                                {momentumIcon}
+                              </span>
+                            )}
                             <span className="text-xs" style={{ color: isWinner ? '#4ade80' : 'var(--text-muted)' }}>
                               {pos.position.toFixed(2)}% | {rank}{rankSuffix} | ×{room?.bet_options.find(o => o.id === pos.option_id)?.odds.toFixed(1)}
                             </span>
