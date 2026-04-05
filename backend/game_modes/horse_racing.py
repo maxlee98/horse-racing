@@ -241,17 +241,8 @@ class HorseRacingMode(GameModeStrategy):
             }
         })
         
-        # Send final results
-        await broadcast({
-            "type": "race_ended",
-            "data": {
-                "winner_id": winner_id,
-                "winner_label": winner.label if winner else "Unknown",
-                "final_results": final_positions,
-                "race_duration": round(elapsed, 2),
-            }
-        })
-        
+        # Return winning_bets info along with the result
+        # The main.py will add winning_bets and broadcast again
         return True, f"Race complete! Winner: {winner.label if winner else 'Unknown'}", winner_id
 
     def check_win(self, bet: Bet, winning_value: Any) -> bool:

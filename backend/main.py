@@ -347,6 +347,21 @@ async def _handle_host_action(
                             }
                         })
                     
+                    # For horse racing, broadcast race_ended with winning_bets
+                    elif room.game_mode == GameMode.HORSE_RACING:
+                        winner_label = next(
+                            (opt.label for opt in room.bet_options if opt.id == room.winner_option_id), 
+                            "Unknown"
+                        )
+                        await ws_manager.broadcast(room_id, {
+                            "type": WSMessageType.RACE_ENDED,
+                            "data": {
+                                "winner_id": room.winner_option_id,
+                                "winner_label": winner_label,
+                                "winning_bets": winning_bets,
+                            }
+                        })
+                    
                     # Broadcast game ended with winning bets
                     await ws_manager.broadcast(room_id, {
                         "type": WSMessageType.GAME_ENDED,

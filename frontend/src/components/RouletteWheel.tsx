@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useCallback } from 'react';
-import { AMERICAN_ROULETTE_ORDER, ROULETTE_COLORS } from '@/types/game';
+import { ROULETTE_WHEEL_ORDER, ROULETTE_COLORS } from '@/shared/types/game';
 
 interface RouletteWheelProps {
   wheelRotation: number;
@@ -40,7 +40,7 @@ export default function RouletteWheel({
     // Draw pockets
     const pocketAngle = (Math.PI * 2) / 38;
     
-    AMERICAN_ROULETTE_ORDER.forEach((num, index) => {
+    ROULETTE_WHEEL_ORDER.forEach((num: number, index: number) => {
       const angle = (index * pocketAngle) - (Math.PI / 2) + (wheelRotation * Math.PI / 180);
       const color = ROULETTE_COLORS[num];
       

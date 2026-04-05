@@ -104,8 +104,13 @@ class BettingService:
         
         for bet in room.bets:
             if game_mode.check_win(bet, winning_value):
-                payout_multiplier = game_mode.get_payout_multiplier(bet)
-                payout = bet.amount * (payout_multiplier + 1)
+                # Use bet.potential_win for horse racing (already includes odds)
+                # For other game modes, use the multiplier formula
+                if room.game_mode.value == "horse_racing":
+                    payout = bet.potential_win
+                else:
+                    payout_multiplier = game_mode.get_payout_multiplier(bet)
+                    payout = bet.amount * (payout_multiplier + 1)
                 
                 player = room.players.get(bet.player_id)
                 if player:

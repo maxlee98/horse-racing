@@ -160,7 +160,13 @@ class RoomService:
         if not room.bet_options:
             raise ValueError("No bet options")
         
-        # Generate random probabilities
+        # Skip probability randomization for roulette - it has fixed preset odds
+        # Randomized probabilities would distort the fixed payout structure
+        if room.game_mode == GameMode.ROULETTE:
+            self._repo.save(room)
+            return room
+        
+        # Generate random probabilities for other game modes
         import random
         raw_probs = [random.random() for _ in room.bet_options]
         total = sum(raw_probs)

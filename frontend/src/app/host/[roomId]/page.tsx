@@ -5,7 +5,6 @@ import { useParams } from 'next/navigation';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { RoomState, WSMessage, RaceState, RacePosition, RaceResults, RouletteState } from '@/types/game';
 import RouletteWheel from '@/components/RouletteWheel';
-import { ROULETTE_COLORS } from '@/types/game';
 
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';

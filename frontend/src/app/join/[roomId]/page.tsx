@@ -1,10 +1,9 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { RoomState, WSMessage, Bet, RaceState, RacePosition, RouletteState, RouletteBetType, ROULETTE_BET_ODDS } from '@/types/game';
-import RouletteWheel from '@/components/RouletteWheel';
 import RouletteTable from '@/components/RouletteTable';
 
 export default function JoinPage() {
@@ -47,6 +46,14 @@ export default function JoinPage() {
   const [gameResults, setGameResults] = useState<{
     winningNumber: string;
     winningColor: string;
+    myBets: Array<{ label: string; amount: number; won: boolean; payout: number }>;
+    totalBet: number;
+    totalWon: number;
+    netResult: number;
+  } | null>(null);
+  const [horseRaceResults, setHorseRaceResults] = useState<{
+    winningHorse: string;
+    winningHorseLabel: string;
     myBets: Array<{ label: string; amount: number; won: boolean; payout: number }>;
     totalBet: number;
     totalWon: number;
@@ -117,13 +124,35 @@ export default function JoinPage() {
         message,
       }));
     } else if (msg.type === 'race_ended') {
-      const { winner_id, winner_label } = msg.data as { winner_id: string; winner_label: string };
+      const data = msg.data as { 
+        winner_id: string; 
+        winning_bets?: Array<{ player_id: string; payout: number; option_id: string; option_label?: string }> 
+      };
       setRaceState(prev => ({
         ...prev,
         is_racing: false,
-        winner_id,
+        winner_id: data.winner_id,
       }));
-      notify(`🏆 ${winner_label} won the race!`);
+      
+      // Calculate horse race results for display
+      const myWinningBets = data.winning_bets?.filter(wb => wb.player_id === playerId) || [];
+      const winnerLabel = room?.bet_options.find(o => o.id === data.winner_id)?.label || 'Unknown';
+      
+      setHorseRaceResults({
+        winningHorse: data.winner_id,
+        winningHorseLabel: winnerLabel,
+        myBets: myBets.map(bet => ({
+          label: bet.option_label,
+          amount: bet.amount,
+          won: bet.option_id === data.winner_id,
+          payout: myWinningBets.find(wb => wb.option_id === bet.option_id)?.payout || 0,
+        })),
+        totalBet: myBets.reduce((sum, b) => sum + b.amount, 0),
+        totalWon: myWinningBets.reduce((sum, wb) => sum + wb.payout, 0),
+        netResult: myWinningBets.reduce((sum, wb) => sum + wb.payout, 0) - myBets.reduce((sum, b) => sum + b.amount, 0),
+      });
+      
+      notify(`🏆 ${winnerLabel} won the race!`);
     }
 
     // Handle roulette messages
@@ -235,6 +264,7 @@ export default function JoinPage() {
         progress: 0 
       });
       setGameResults(null);
+      setHorseRaceResults(null);
       setSelectedOption('');
       setSelectedBetType(null);
       setSelectedNumber(undefined);
@@ -413,6 +443,51 @@ export default function JoinPage() {
               ? <p style={{ color: 'var(--green)' }}>You won <strong>+${myWinnerBet.potential_win}</strong>!</p>
               : <p style={{ color: 'var(--red)' }}>Better luck next time.</p>
             }
+          </div>
+        )}
+
+        {/* Horse Racing Results Module */}
+        {room?.status === 'ended' && room?.game_mode === 'horse_racing' && horseRaceResults && (
+          <div className="card p-4 mb-4" style={{ borderColor: horseRaceResults.netResult >= 0 ? 'var(--green)' : 'var(--red)', background: horseRaceResults.netResult >= 0 ? 'var(--green-soft)' : 'var(--red-soft)' }}>
+            <div className="text-center mb-4">
+              <p className="text-3xl mb-2">🏇</p>
+              <p className="font-black text-lg">{horseRaceResults.winningHorseLabel} Wins!</p>
+            </div>
+            
+            <p className="text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--text-muted)' }}>Your Bets</p>
+            <div className="space-y-2 mb-4">
+              {horseRaceResults.myBets.map((bet, i) => (
+                <div key={i} className="flex items-center justify-between text-sm p-2 rounded" style={{ background: 'rgba(255,255,255,0.1)' }}>
+                  <div className="flex items-center gap-2">
+                    <span>{bet.won ? '✅' : '❌'}</span>
+                    <span>{bet.label}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-mono">${bet.amount}</span>
+                    {bet.won && (
+                      <span className="ml-2 font-mono font-bold" style={{ color: 'var(--green)' }}>+${bet.payout.toFixed(2)}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <div className="border-t pt-3" style={{ borderColor: 'var(--border)' }}>
+              <div className="flex items-center justify-between text-sm mb-1">
+                <span style={{ color: 'var(--text-muted)' }}>Total Bet:</span>
+                <span className="font-mono">${horseRaceResults.totalBet.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm mb-1">
+                <span style={{ color: 'var(--text-muted)' }}>Total Won:</span>
+                <span className="font-mono" style={{ color: 'var(--green)' }}>${horseRaceResults.totalWon.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between text-lg font-bold mt-2 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+                <span>Net Result:</span>
+                <span style={{ color: horseRaceResults.netResult >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {horseRaceResults.netResult >= 0 ? '+' : ''}${horseRaceResults.netResult.toFixed(2)}
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
